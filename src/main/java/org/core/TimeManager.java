@@ -7,7 +7,7 @@ import org.chesslib.Side;
 public final class TimeManager {
 	public static record TimeAllocation(long soft, long maximum) {}
 
-	public static final int TIMER_BUFFER_MS = 200; // Buffer to avoid flagging on time controls
+	public static final int TIMER_BUFFER_MS = 100; // Buffer to avoid flagging on time controls
 	public static final int MOVE_TIME_BUFFER_MS = 5; // Smaller buffer for explicit movetime
 	public static final int MIN_SEARCH_TIME_MS = 200; // Minimum when movetime is used
 	public static final int DEFAULT_MOVES_TO_GO = 40;
