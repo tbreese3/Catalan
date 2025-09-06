@@ -230,6 +230,10 @@ public final class Search {
         if (stopCheck()) return 0;
         nodes++;
 
+        if (board.isDraw()) {
+            return 0;
+        }
+        
         boolean inCheck = board.isKingAttacked();
 
         int standPat;
