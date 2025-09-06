@@ -106,30 +106,35 @@ public final class Search {
                 e.reduction = 0;
             }
 
-            double delta = 12.0;
-            int alpha = -INFTY;
-            int beta = INFTY;
-            int d = (int) Math.round(delta);
-            alpha = Math.max(-INFTY, previousScore - d);
-            beta = Math.min(INFTY, previousScore + d);
-            int searchDepth = depth;
-            while (true) {
-                score = negamax(root, searchDepth, 0, alpha, beta, true);
-                if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
-                if (score <= alpha) {
-                    int oldAlpha = alpha;
-                    beta = (oldAlpha + beta) / 2;
-                    d = (int) Math.round(delta);
-                    alpha = Math.max(-INFTY, score - d);
-                    searchDepth = depth;
-                } else if (score >= beta) {
-                    d = (int) Math.round(delta);
-                    beta = Math.min(INFTY, score + d);
-                    searchDepth = Math.max(searchDepth - 1, 1);
-                } else {
-                    break;
+            final int rootDepth = depth;
+
+            if (depth <= 3) {
+                score = negamax(root, depth, 0, -INFTY, INFTY, true);
+            } else {
+                int delta = 12;
+                int alpha = Math.max(-INFTY, previousScore - delta);
+                int beta  = Math.min( INFTY, previousScore + delta);
+
+                int searchDepth = depth;
+
+                while (true) {
+                    score = negamax(root, searchDepth, 0, alpha, beta, true);
+                    if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
+
+                    if (score <= alpha) {
+                        beta  = (alpha + beta) / 2;
+                        alpha = Math.max(-INFTY, score - delta);
+                        searchDepth = rootDepth;
+                    } else if (score >= beta) {
+                        beta = Math.min( INFTY, score + delta);
+                        searchDepth = Math.max(searchDepth - 1, 1);
+                    } else {
+                        // inside window
+                        break;
+                    }
+
+                    delta = (int) Math.round(delta * 1.5);
                 }
-                delta = delta * 1.5;
             }
 
             if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
