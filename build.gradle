@@ -1,7 +1,7 @@
 plugins {
     id 'java'
     id 'application'
-    id 'com.gradleup.shadow' version '9.0.2'   // <= new id + Gradle 9-compatible
+    id 'com.gradleup.shadow' version '9.0.2'
     id 'de.undercouch.download' version '5.6.0'
 }
 
@@ -23,7 +23,6 @@ ext {
     mainClassName = 'org.main.Main'
     jreMajor      = '24'
 
-    // ✅ use the API endpoint (stable) instead of a changing GitHub asset name
     jreWinZipUrl  = "https://api.adoptium.net/v3/binary/latest/${jreMajor}/ga/windows/x64/jre/hotspot/normal/eclipse"
 
     warpVersion   = '0.3.0'
@@ -32,7 +31,7 @@ ext {
 
 application { mainClass = mainClassName }
 
-java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(24) } }
 
 /** Fat JAR */
 tasks.named('shadowJar') {
