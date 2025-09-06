@@ -111,7 +111,7 @@ public final class Search {
             if (depth <= 3) {
                 score = negamax(root, depth, 0, -INFTY, INFTY, true);
             } else {
-                int delta = 12; // start window size (cp), grows by *1.44 on each fail
+                int delta = 12;
                 int alpha = Math.max(-INFTY, previousScore - delta);
                 int beta  = Math.min( INFTY, previousScore + delta);
 
@@ -122,12 +122,10 @@ public final class Search {
                     if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
                     if (score <= alpha) {
-                        // fail-low: shrink upper half a bit, widen downward, keep original depth
                         beta  = (alpha + beta) / 2;
                         alpha = Math.max(-INFTY, score - delta);
                         searchDepth = rootDepth;
                     } else if (score >= beta) {
-                        // fail-high: widen upward and (like the reference) reduce depth by 1
                         beta = Math.min( INFTY, score + delta);
                         searchDepth = Math.max(searchDepth - 1, 1);
                     } else {
