@@ -294,7 +294,6 @@ public final class Search {
             if (inCheck) {
                 return -MATE_VALUE + ply;
             }
-            return 0;
         }
 
         return bestScore;
