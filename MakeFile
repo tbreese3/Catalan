@@ -4,7 +4,7 @@ EXE ?= Catalan.exe                 # OpenBench passes EXE=Catalan-<sha>[.exe]
 .PHONY: all clean
 
 all:
-	buildandcopy.bat "$(EXE)"
+	build.bat "$(EXE)"
 
 clean:
 	gradlew.bat --no-daemon clean
