@@ -232,23 +232,35 @@ public final class Search {
 
         boolean inCheck = board.isKingAttacked();
 
+        // Stand-pat when not in check
         int standPat;
         if (!inCheck) {
             standPat = evaluate(board);
-            if (standPat >= beta) return standPat;
+            if (standPat >= beta) return standPat;   // standard qsearch cutoff
             if (standPat > alpha) alpha = standPat;
         } else {
             standPat = -INFTY;
         }
 
+        // Build move list:
+        // - in check: all legal moves
+        // - not in check: all captures + quiet checking moves
         List<Move> moves;
         if (inCheck) {
             moves = MoveGenerator.generateLegalMoves(board);
         } else {
+            // 1) Captures
             List<Move> caps = MoveGenerator.generatePseudoLegalCaptures(board);
-            moves = new ArrayList<>(caps.size());
+            moves = new ArrayList<>(caps.size() + 16);
             for (Move m : caps) {
                 if (board.isMoveLegal(m, false)) moves.add(m);
+            }
+
+            // 2) Quiet checks
+            List<Move> legals = MoveGenerator.generateLegalMoves(board);
+            for (Move m : legals) {
+                if (isCapture(board, m)) continue;          // skip captures; already added
+                if (givesCheck(board, m)) moves.add(m);     // include only checking quiets
             }
         }
 
@@ -256,10 +268,13 @@ public final class Search {
         se.pvLength = 0;
 
         int bestScore = standPat;
+
         for (int i = 0; i < moves.size(); i++) {
             if (stopCheck()) break;
+
             Move m = moves.get(i);
             if (!board.doMove(m)) continue;
+
             int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode);
             board.undoMove();
 
@@ -267,19 +282,31 @@ public final class Search {
                 bestScore = score;
                 if (score > alpha) {
                     alpha = score;
+
                     se.pv[0] = m;
                     int childLen = stack[ply + 1].pvLength;
                     System.arraycopy(stack[ply + 1].pv, 0, se.pv, 1, childLen);
                     se.pvLength = childLen + 1;
-                }
-            }
 
-            if (alpha >= beta) {
-                break;
+                    if (alpha >= beta) break;
+                }
             }
         }
 
+        if (inCheck && moves.isEmpty()) return -MATE_VALUE + ply;
+
         return bestScore;
+    }
+
+    private static boolean isCapture(Board b, Move m) {
+        return b.getPiece(m.getTo()) != null;
+    }
+
+    private static boolean givesCheck(Board b, Move m) {
+        if (!b.doMove(m)) return false;
+        boolean check = b.isKingAttacked();
+        b.undoMove();
+        return check;
     }
 
     private int evaluate(Board board) {
