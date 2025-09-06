@@ -180,18 +180,14 @@ public final class Search {
         }
 
         List<Move> moves = MoveGenerator.generateLegalMoves(board);
-        if (moves.isEmpty()) {
-            if (inCheck) {
-                return -MATE_VALUE + ply;
-            }
-            return 0;
-        }
 
+        boolean movePlayed = false;
         int bestScore = -INFTY;
         for (int i = 0; i < moves.size(); i++) {
             if (stopCheck()) break;
             Move m = moves.get(i);
             if (!board.doMove(m)) continue;
+            movePlayed = true;
             int score;
             boolean childPv = pvNode && i == 0;
             if (childPv) {
@@ -223,6 +219,13 @@ public final class Search {
             }
         }
 
+        if (!movePlayed) {
+            if (inCheck) {
+                return -MATE_VALUE + ply;
+            }
+            return 0;
+        }
+
         return bestScore;
     }
 
@@ -230,7 +233,8 @@ public final class Search {
         if (stopCheck()) return 0;
         nodes++;
 
-        if (board.isDraw()) {
+        if (board.isRepetition() || board.getHalfMoveCounter() >= 100)
+        {
             return 0;
         }
         
@@ -259,11 +263,13 @@ public final class Search {
         StackEntry se = stack[ply];
         se.pvLength = 0;
 
+        boolean movePlayed = false;
         int bestScore = standPat;
         for (int i = 0; i < moves.size(); i++) {
             if (stopCheck()) break;
             Move m = moves.get(i);
             if (!board.doMove(m)) continue;
+            movePlayed = true;
             int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode);
             board.undoMove();
 
@@ -281,6 +287,14 @@ public final class Search {
             if (alpha >= beta) {
                 break;
             }
+        }
+
+        if(!movePlayed)
+        {
+            if (inCheck) {
+                return -MATE_VALUE + ply;
+            }
+            return 0;
         }
 
         return bestScore;
