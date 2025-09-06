@@ -125,7 +125,7 @@ public final class Search {
                 int failHighCount = 0;
 
                 while (true) {
-                    // reset PV stacks
+                    // reset PV stacks (belt-and-suspenders)
                     for (int i = 0; i < stack.length; i++) {
                         stack[i].pvLength = 0;
                         stack[i].inCheck = false;
@@ -134,10 +134,11 @@ public final class Search {
                     int adjustedDepth = Math.max(1, depth - failHighCount);
                     int score = rootNegamax(root, adjustedDepth, alpha, beta);
 
+                    // if stopped, bail out immediately; do not reorder based on partial writes
+                    if (stopRequested || nowMs() >= hardStopTimeMs) break;
+
                     // rootNegamax updated the current move's PV/score; keep list ordered from pvIdx onward
                     sortRootMovesFrom(currentPvIdx);
-
-                    if (stopRequested || nowMs() >= hardStopTimeMs) break;
 
                     if (score <= alpha) {
                         beta  = (alpha + beta) / 2;
@@ -183,6 +184,9 @@ public final class Search {
     private int rootNegamax(Board board, int depth, int alpha, int beta) {
         int bestScore = -INFTY;
 
+        // ensure root PV starts clean
+        stack[0].pvLength = 0;
+
         for (int i = currentPvIdx; i < rootMoves.size(); i++) {
             RootMove rm = rootMoves.get(i);
             Move m = rm.move;
@@ -208,8 +212,8 @@ public final class Search {
                 // stitch PV at root (stack)
                 StackEntry cur = stack[0];
                 StackEntry child = stack[1];
-                cur.pv[0] = m;
-                cur.pvLength = 1;
+                cur.pvLength = 0; // clear before writing
+                cur.pv[cur.pvLength++] = m;
                 for (int k = 0; k < child.pvLength; k++) cur.pv[cur.pvLength + k] = child.pv[k];
                 cur.pvLength += child.pvLength;
 
@@ -240,6 +244,10 @@ public final class Search {
         nodes++;
         selDepth = Math.max(selDepth, ply);
 
+        // clear PV at entry to avoid stale tails
+        StackEntry cur = stack[ply];
+        cur.pvLength = 0;
+
         if (board.isDraw()) return 0;
 
         boolean inCheck = board.isKingAttacked();
@@ -257,7 +265,6 @@ public final class Search {
 
         for (Move m : moves) {
             if (stopCheck()) break;
-            long before = nodes;
 
             if (!board.doMove(m)) { idx++; continue; }
 
@@ -278,10 +285,9 @@ public final class Search {
                 bestScore = score;
 
                 // stitch PV
-                StackEntry cur = stack[ply];
                 StackEntry child = stack[ply + 1];
-                cur.pv[0] = m;
-                cur.pvLength = 1;
+                cur.pvLength = 0; // rewrite from scratch on improvement
+                cur.pv[cur.pvLength++] = m;
                 for (int k = 0; k < child.pvLength; k++) cur.pv[cur.pvLength + k] = child.pv[k];
                 cur.pvLength += child.pvLength;
 
@@ -298,6 +304,10 @@ public final class Search {
     private int quiescence(Board board, int ply, int alpha, int beta) {
         if (stopCheck()) return 0;
         nodes++;
+
+        // clear PV at entry to avoid stale tails
+        StackEntry cur = stack[ply];
+        cur.pvLength = 0;
 
         boolean inCheck = board.isKingAttacked();
 
@@ -339,10 +349,9 @@ public final class Search {
                 bestScore = score;
 
                 // stitch PV
-                StackEntry cur = stack[ply];
                 StackEntry child = stack[ply + 1];
-                cur.pv[0] = m;
-                cur.pvLength = 1;
+                cur.pvLength = 0; // rewrite from scratch on improvement
+                cur.pv[cur.pvLength++] = m;
                 for (int k = 0; k < child.pvLength; k++) cur.pv[cur.pvLength + k] = child.pv[k];
                 cur.pvLength += child.pvLength;
 
@@ -361,8 +370,6 @@ public final class Search {
         return Eval.evaluate(state, board);
     }
 
-    // Helpers
-
     private void sortRootMovesFrom(int offset) {
         // selection sort by descending score starting at offset
         for (int i = offset; i < rootMoves.size(); i++) {
@@ -376,19 +383,6 @@ public final class Search {
                 rootMoves.set(best, tmp);
             }
         }
-    }
-
-    @SuppressWarnings("unused")
-    private int indexOfRootMove(List<RootMove> rms, Move target) {
-        for (int i = 0; i < rms.size(); i++) {
-            if (equalsMove(rms.get(i).move, target)) return i;
-        }
-        return -1;
-    }
-
-    private boolean equalsMove(Move a, Move b) {
-        if (a == null || b == null) return false;
-        return a.getFrom() == b.getFrom() && a.getTo() == b.getTo() && a.getPromotion() == b.getPromotion();
     }
 
     private boolean stopCheck() {
