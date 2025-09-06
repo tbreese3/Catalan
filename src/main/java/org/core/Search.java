@@ -281,7 +281,7 @@ public final class Search {
                 bestScore = score;
                 if (score > alpha) {
                     alpha = score;
-                    
+
                     se.pv[0] = m;
                     int childLen = stack[ply + 1].pvLength;
                     System.arraycopy(stack[ply + 1].pv, 0, se.pv, 1, childLen);
@@ -305,13 +305,6 @@ public final class Search {
                         m.getTo() == b.getEnPassant() &&
                         !m.getFrom().getFile().equals(m.getTo().getFile())
                 );
-    }
-
-    private static boolean givesCheck(Board b, Move m) {
-        if (!b.doMove(m)) return false;
-        boolean check = b.isKingAttacked();
-        b.undoMove();
-        return check;
     }
 
     private int evaluate(Board board) {
