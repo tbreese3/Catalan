@@ -151,7 +151,7 @@ public class UCI {
             } else {
                 limits.depth = fDepth;
             }
-            Search.Result res = search.search(board, limits, (depthInfo, seldepth, nodes, nps, hashfull, scoreCp, timeMs, pv) -> {
+            Search.Result res = search.search(board, limits, (depthInfo, seldepth, nodes, nps, hashfull, scoreCp, timeMs, multipv, pv) -> {
                 StringBuilder sb = new StringBuilder();
                 sb.append("info depth ").append(depthInfo)
                         .append(" seldepth ").append(seldepth)
