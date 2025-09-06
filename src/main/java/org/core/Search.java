@@ -189,7 +189,6 @@ public final class Search {
 
         int bestScore = -INFTY;
         for (int i = 0; i < moves.size(); i++) {
-            if (stopCheck()) break;
             Move m = moves.get(i);
             if (!board.doMove(m)) continue;
             int score;
@@ -229,53 +228,38 @@ public final class Search {
     private int quiescence(Board board, int ply, int alpha, int beta, boolean pvNode) {
         if (stopCheck()) return 0;
         nodes++;
+        selDepth = Math.max(selDepth, ply);
 
-        boolean inCheck = board.isKingAttacked();
+        final boolean inCheck = board.isKingAttacked();
 
-        // Stand-pat when not in check
+        // Stand-pat (only when not in check)
         int standPat;
         if (!inCheck) {
             standPat = evaluate(board);
-            if (standPat >= beta) return standPat;   // standard qsearch cutoff
+            if (standPat >= beta) return standPat;
             if (standPat > alpha) alpha = standPat;
         } else {
             standPat = -INFTY;
         }
 
-        // Build move list:
-        // - in check: all legal moves
-        // - not in check: all captures + quiet checking moves
-        List<Move> moves;
-        if (inCheck) {
-            moves = MoveGenerator.generateLegalMoves(board);
-        } else {
-            // 1) Captures
-            List<Move> caps = MoveGenerator.generatePseudoLegalCaptures(board);
-            moves = new ArrayList<>(caps.size() + 16);
-            for (Move m : caps) {
-                if (board.isMoveLegal(m, false)) moves.add(m);
-            }
-
-            // 2) Quiet checks
-            List<Move> legals = MoveGenerator.generateLegalMoves(board);
-            for (Move m : legals) {
-                if (isCapture(board, m)) continue;          // skip captures; already added
-                if (givesCheck(board, m)) moves.add(m);     // include only checking quiets
-            }
-        }
+        List<Move> moves = MoveGenerator.generateLegalMoves(board);
 
         StackEntry se = stack[ply];
         se.pvLength = 0;
 
         int bestScore = standPat;
+        int searched = 0;
 
         for (int i = 0; i < moves.size(); i++) {
             if (stopCheck()) break;
-
             Move m = moves.get(i);
-            if (!board.doMove(m)) continue;
+
+            if (!enterChildIfSearchable(board, inCheck, m)) continue;
+
+            searched++;
 
             int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode);
+
             board.undoMove();
 
             if (score > bestScore) {
@@ -283,6 +267,7 @@ public final class Search {
                 if (score > alpha) {
                     alpha = score;
 
+                    // PV stitching
                     se.pv[0] = m;
                     int childLen = stack[ply + 1].pvLength;
                     System.arraycopy(stack[ply + 1].pv, 0, se.pv, 1, childLen);
@@ -293,9 +278,25 @@ public final class Search {
             }
         }
 
-        if (inCheck && moves.isEmpty()) return -MATE_VALUE + ply;
+        // In-check and nothing was playable → checkmate
+        if (inCheck && searched == 0) return -MATE_VALUE + ply;
 
         return bestScore;
+    }
+
+    private boolean enterChildIfSearchable(Board board, boolean parentInCheck, Move m) {
+        // If parent was in check, search all replies
+        if (parentInCheck) return board.doMove(m);
+
+        // If it's a capture, always search
+        boolean isCapture = board.getPiece(m.getTo()) != null;
+        if (isCapture) return board.doMove(m);
+
+        // Otherwise: quiet move — only search if it gives check
+        if (!board.doMove(m)) return false;
+        if (board.isKingAttacked()) return true; // we gave check
+        board.undoMove();
+        return false;
     }
 
     private static boolean isCapture(Board b, Move m) {
