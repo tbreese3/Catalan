@@ -122,14 +122,12 @@ public final class Search {
                     if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
                     if (score <= alpha) {
-                        beta  = (alpha + beta) / 2;
                         alpha = Math.max(-INFTY, score - delta);
                         searchDepth = rootDepth;
                     } else if (score >= beta) {
-                        beta = Math.min( INFTY, score + delta);
-                        searchDepth = Math.max(searchDepth - 1, 1);
+                        beta = Math.min(INFTY, score + delta);
+                        searchDepth = rootDepth;
                     } else {
-                        // inside window
                         break;
                     }
 
