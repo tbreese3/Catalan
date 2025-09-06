@@ -168,9 +168,7 @@ public final class Search {
         StackEntry se = stack[ply];
         se.pvLength = 0;
 
-        if (board.isDraw()) {
-            return 0;
-        }
+        if (board.isDraw()) return 0;
 
         boolean inCheck = board.isKingAttacked();
         se.inCheck = inCheck;
@@ -214,17 +212,10 @@ public final class Search {
                 }
             }
 
-            if (alpha >= beta) {
-                break;
-            }
+            if (alpha >= beta) break;
         }
 
-        if (!movePlayed) {
-            if (inCheck) {
-                return -MATE_VALUE + ply;
-            }
-            return 0;
-        }
+        if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
 
         return bestScore;
     }
@@ -233,10 +224,7 @@ public final class Search {
         if (stopCheck()) return 0;
         nodes++;
 
-        if (board.isRepetition() || board.getHalfMoveCounter() >= 100)
-        {
-            return 0;
-        }
+        if (board.isDraw()) return 0;
         
         boolean inCheck = board.isKingAttacked();
 
