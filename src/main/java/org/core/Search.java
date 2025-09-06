@@ -1,6 +1,9 @@
 package org.core;
 
 import org.chesslib.Board;
+import org.chesslib.Piece;
+import org.chesslib.PieceType;
+import org.chesslib.Square;
 import org.chesslib.move.Move;
 import org.chesslib.move.MoveGenerator;
 
@@ -176,7 +179,7 @@ public final class Search {
         se.inCheck = inCheck;
 
         if (depth <= 0) {
-            return quiescence(board, ply, alpha, beta, pvNode);
+            return quiescence(board, ply, alpha, beta, pvNode, true);
         }
 
         List<Move> moves = MoveGenerator.generateLegalMoves(board);
@@ -225,14 +228,15 @@ public final class Search {
         return bestScore;
     }
 
-    private int quiescence(Board board, int ply, int alpha, int beta, boolean pvNode) {
+    private int quiescence(Board board, int ply, int alpha, int beta, boolean pvNode, boolean allowQuietChecks) {
         if (stopCheck()) return 0;
         nodes++;
-        selDepth = Math.max(selDepth, ply);
 
+        if (board.isDraw()) return 0;
+
+        selDepth = Math.max(selDepth, ply);
         final boolean inCheck = board.isKingAttacked();
 
-        // Stand-pat (only when not in check)
         int standPat;
         if (!inCheck) {
             standPat = evaluate(board);
@@ -251,23 +255,33 @@ public final class Search {
         int searched = 0;
 
         for (int i = 0; i < moves.size(); i++) {
-            if (stopCheck()) break;
             Move m = moves.get(i);
 
-            if (!enterChildIfSearchable(board, inCheck, m)) continue;
+            // In check: search all replies.
+            // Not in check: search captures; and search quiet checks only if this is the top qsearch ply.
+            if (inCheck) {
+                if (!board.doMove(m)) continue;
+            } else {
+                boolean isCapture = isCapture(board, m);
+                if (!isCapture) {
+                    if (!allowQuietChecks) continue;
+                    if (!board.doMove(m)) continue;
+                    if (!board.isKingAttacked()) { board.undoMove(); continue; }
+                } else {
+                    if (!board.doMove(m)) continue;
+                }
+            }
 
             searched++;
 
-            int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode);
-
+            int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode, false);
             board.undoMove();
 
             if (score > bestScore) {
                 bestScore = score;
                 if (score > alpha) {
                     alpha = score;
-
-                    // PV stitching
+                    
                     se.pv[0] = m;
                     int childLen = stack[ply + 1].pvLength;
                     System.arraycopy(stack[ply + 1].pv, 0, se.pv, 1, childLen);
@@ -278,29 +292,19 @@ public final class Search {
             }
         }
 
-        // In-check and nothing was playable → checkmate
         if (inCheck && searched == 0) return -MATE_VALUE + ply;
 
         return bestScore;
     }
 
-    private boolean enterChildIfSearchable(Board board, boolean parentInCheck, Move m) {
-        // If parent was in check, search all replies
-        if (parentInCheck) return board.doMove(m);
-
-        // If it's a capture, always search
-        boolean isCapture = board.getPiece(m.getTo()) != null;
-        if (isCapture) return board.doMove(m);
-
-        // Otherwise: quiet move — only search if it gives check
-        if (!board.doMove(m)) return false;
-        if (board.isKingAttacked()) return true; // we gave check
-        board.undoMove();
-        return false;
-    }
-
     private static boolean isCapture(Board b, Move m) {
-        return b.getPiece(m.getTo()) != null;
+        return b.getPiece(m.getTo()) != Piece.NONE ||
+                (
+                        b.getEnPassantTarget() != Square.NONE &&
+                        b.getPiece(m.getFrom()).getPieceType() == PieceType.PAWN &&
+                        m.getTo() == b.getEnPassant() &&
+                        !m.getFrom().getFile().equals(m.getTo().getFile())
+                );
     }
 
     private static boolean givesCheck(Board b, Move m) {
