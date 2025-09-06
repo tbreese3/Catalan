@@ -252,6 +252,10 @@ public final class Search {
             }
         }
 
+        if (inCheck && moves.isEmpty()) {
+            return -MATE_VALUE + ply;
+        }
+
         StackEntry se = stack[ply];
         se.pvLength = 0;
 
