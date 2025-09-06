@@ -187,18 +187,7 @@ public final class Search {
             if (!board.doMove(m)) continue;
             movePlayed = true;
             int score;
-            boolean childPv = pvNode && i == 0;
-            if (childPv) {
-                // First move at PV node: full window
-                score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, true);
-            } else {
-                // PVS: zero-window search
-                score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, false);
-                if (pvNode && score > alpha && score < beta) {
-                    // Re-search with full window
-                    score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, true);
-                }
-            }
+            score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, true);
             board.undoMove();
 
             if (score > bestScore) {
