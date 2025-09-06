@@ -169,9 +169,14 @@ public final class Search {
         se.pvLength = 0;
 
         if (board.isDraw()) return 0;
-
+        
         boolean inCheck = board.isKingAttacked();
         se.inCheck = inCheck;
+
+        // Check extension: spend one extra ply when side to move is in check.
+        if (inCheck) {
+            depth++;
+        }
 
         if (depth <= 0) {
             return quiescence(board, ply, alpha, beta, pvNode);
@@ -223,6 +228,7 @@ public final class Search {
     private int quiescence(Board board, int ply, int alpha, int beta, boolean pvNode) {
         if (stopCheck()) return 0;
         nodes++;
+        selDepth = Math.max(selDepth, ply);
 
         if (board.isDraw()) return 0;
         
