@@ -1,0 +1,138 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.gradleup.shadow' version '9.0.2'
+    id 'de.undercouch.download' version '5.6.0'
+}
+
+group = 'org.example'
+version = '1.0-SNAPSHOT'
+
+repositories { mavenCentral() }
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test { useJUnitPlatform() }
+
+/** App + packaging settings */
+ext {
+    appName       = 'Catalan'
+    mainClassName = 'org.main.Main'
+    jreMajor      = '24'
+
+    jreWinZipUrl  = "https://api.adoptium.net/v3/binary/latest/${jreMajor}/ga/windows/x64/jre/hotspot/normal/eclipse"
+
+    warpVersion   = '0.3.0'
+    warpExeUrl    = "https://github.com/dgiagio/warp/releases/download/v${warpVersion}/windows-x64.warp-packer.exe"
+}
+
+application {
+    mainClass = mainClassName
+    applicationDefaultJvmArgs = ['--add-modules', 'jdk.incubator.vector']
+}
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(24) } }
+
+// Enable incubator Vector API for compilation and tests
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['--add-modules', 'jdk.incubator.vector']
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs '--add-modules', 'jdk.incubator.vector'
+}
+
+/** Fat JAR */
+tasks.named('shadowJar') {
+    archiveBaseName.set(appName)
+    archiveClassifier.set('all')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest { attributes 'Main-Class': mainClassName }
+}
+
+def buildDirPath  = layout.buildDirectory
+def toolsDir      = buildDirPath.dir("tools")
+def distDir       = buildDirPath.dir("dist")
+def bundleDir     = buildDirPath.dir("bundle")
+def jreZipFile    = toolsDir.map { it.file("temurin-jre.zip") }
+def jreDir        = buildDirPath.dir("jre-win-x64")
+def warpPackerExe = toolsDir.map { it.file("warp-packer.exe") }
+
+/** Download Temurin JRE (Windows x64) */
+tasks.register('downloadJre', de.undercouch.gradle.tasks.download.Download) {
+    src jreWinZipUrl; dest jreZipFile.get().asFile; overwrite false
+}
+
+/** Unzip JRE into build/jre-win-x64/jre (so we have jre/bin/java.exe) */
+tasks.register('unzipJre', Copy) {
+    dependsOn 'downloadJre'
+    from { zipTree(jreZipFile.get().asFile) }
+    into jreDir
+    doLast {
+        def root = jreDir.get().asFile.listFiles().find { it.isDirectory() }
+        if (root && root.name != 'jre') {
+            copy { from root; into new File(jreDir.get().asFile, 'jre') }
+            delete root
+        }
+        if (!new File(jreDir.get().asFile, 'jre/bin/java.exe').exists()) {
+            throw new GradleException("Bundled JRE not found at ${jreDir.get().asFile}/jre/bin/java.exe")
+        }
+    }
+}
+
+/** Minimal Windows launcher used by Warp (calls bundled JRE) */
+tasks.register('writeLauncher') {
+    outputs.file(bundleDir.map { it.file("run.cmd") })
+    doLast {
+        def f = bundleDir.get().file("run.cmd").asFile
+        f.parentFile.mkdirs()
+        f.text = """@echo off
+setlocal
+set "HERE=%~dp0"
+set "JAVA=%HERE%jre\\bin\\java.exe"
+if not exist "%JAVA%" (
+  echo ERROR: Bundled JRE not found: "%JAVA%"
+  exit /b 1
+)
+"%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
+endlocal
+"""
+    }
+}
+
+/** Lay out bundle directory: app.jar + jre + run.cmd */
+tasks.register('bundleApp', Copy) {
+    dependsOn 'shadowJar', 'unzipJre', 'writeLauncher'
+    from(tasks.named('shadowJar')) { rename { 'app.jar' } }
+    from({ new File(jreDir.get().asFile, 'jre') }) { into 'jre' }
+    into bundleDir
+}
+
+/** Download warp-packer.exe */
+tasks.register('downloadWarp', de.undercouch.gradle.tasks.download.Download) {
+    src warpExeUrl; dest warpPackerExe.get().asFile; overwrite false
+}
+
+/** Build single-file EXE */
+tasks.register('warpPack', Exec) {
+    dependsOn 'bundleApp', 'downloadWarp'
+    inputs.dir bundleDir
+    outputs.file distDir.map { it.file("${appName}.exe") }
+    doFirst { distDir.get().asFile.mkdirs() }
+    commandLine warpPackerExe.get().asFile.absolutePath,
+            '--arch', 'windows-x64',
+            '--input_dir', bundleDir.get().asFile.absolutePath,
+            '--exec', 'run.cmd',
+            '--output', distDir.get().file("${appName}.exe").asFile.absolutePath
+}
+
+/** Convenience meta-task */
+tasks.register('packageExe') {
+    group = 'distribution'
+    description = 'Build the single-file Windows EXE with a bundled JRE.'
+    dependsOn 'warpPack'
+}
