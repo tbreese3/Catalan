@@ -27,12 +27,9 @@ public class EvalAccumulatorTest {
     }
 
     @Test
-    void incrementalAccumulatorMatchesRefreshDepth4() {
-        PositionFactory pf = new PositionFactory();
-        MoveGenerator gen = new MoveGenerator();
-
+    void incrementalAccumulatorMatchesRefresh() {
         for (String fen : BENCH_FENS) {
-            long[] board = pf.fromFen(fen);
+            long[] board = PositionFactory.fromFen(fen);
             Eval.NNUEState inc = new Eval.NNUEState();
             Eval.refreshAccumulator(inc, board);
 
@@ -41,22 +38,22 @@ public class EvalAccumulatorTest {
             Eval.refreshAccumulator(fullRoot, board);
             assertEquals(Eval.evaluate(fullRoot, board), Eval.evaluate(inc, board), "Root eval mismatch for FEN: " + fen);
 
-            dfsCheck(fen, board, inc, pf, gen, 3);
+            dfsCheck(fen, board, inc, 3);
         }
     }
 
-    private void dfsCheck(String fen, long[] board, Eval.NNUEState inc, PositionFactory pf, MoveGenerator gen, int depth) {
+    private void dfsCheck(String fen, long[] board, Eval.NNUEState inc, int depth) {
         if (depth == 0) return;
 
         int[] moves = new int[256];
-        int n = gen.generateCaptures(board, moves, 0);
-        n = gen.generateQuiets(board, moves, n);
+        int n = MoveGenerator.generateCaptures(board, moves, 0);
+        n = MoveGenerator.generateQuiets(board, moves, n);
 
         for (int i = 0; i < n; i++) {
             int mv = moves[i];
 
             Eval.doMoveAccumulator(inc, board, mv);
-            if (!pf.makeMoveInPlace(board, mv, gen)) { // illegal
+            if (!PositionFactory.makeMoveInPlace(board, mv)) { // illegal
                 Eval.undoMoveAccumulator(inc);
                 continue;
             }
@@ -68,9 +65,9 @@ public class EvalAccumulatorTest {
             int evalFull = Eval.evaluate(full, board);
             assertEquals(evalFull, evalInc, () -> "Eval mismatch at depth=" + depth + " FEN=" + fen + " move=" + MoveFactory.moveToUci(mv));
 
-            dfsCheck(fen, board, inc, pf, gen, depth - 1);
+            dfsCheck(fen, board, inc, depth - 1);
 
-            pf.undoMoveInPlace(board);
+            PositionFactory.undoMoveInPlace(board);
             Eval.undoMoveAccumulator(inc);
         }
     }

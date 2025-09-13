@@ -162,7 +162,7 @@ public final class MoveGenerator {
     return bb;
   }
 
-  public int generateCaptures(long[] bb, int[] mv, int n) {
+  public static int generateCaptures(long[] bb, int[] mv, int n) {
     boolean white = whiteToMove(bb);
     final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
     final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
@@ -203,7 +203,7 @@ public final class MoveGenerator {
     return n;
   }
 
-  public int generateQuiets(long[] bb, int[] mv, int n) {
+  public static int generateQuiets(long[] bb, int[] mv, int n) {
     boolean white = whiteToMove(bb);
     final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
     final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
@@ -240,7 +240,7 @@ public final class MoveGenerator {
     return n;
   }
 
-  public int generateEvasions(long[] bb, int[] mv, int n) {
+  public static int generateEvasions(long[] bb, int[] mv, int n) {
     boolean white = whiteToMove(bb);
     final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
     final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
@@ -296,7 +296,7 @@ public final class MoveGenerator {
     return n;
   }
 
-  public boolean castleLegal(long[] bb, int from, int to) {
+  public static boolean castleLegal(long[] bb, int from, int to) {
     boolean white = from == 4;
     int rookFrom  = white ? (to == 6 ? 7  : 0) : (to == 62 ? 63 : 56);
     long pathMask = to == 6 || to == 62 ? (1L << (from+1)) | (1L << (from+2)) : (1L << (from-1)) | (1L << (from-2)) | (1L << (from-3));
@@ -331,7 +331,7 @@ public final class MoveGenerator {
     return n;
   }
 
-  private boolean squareAttacked(long[] bb, boolean byWhite, int sq) {
+  private static boolean squareAttacked(long[] bb, boolean byWhite, int sq) {
     long occ =  bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
     return attackersToSquare(bb, occ, sq, /*usIsWhite=*/!byWhite) != 0;
   }
@@ -584,7 +584,7 @@ public final class MoveGenerator {
     return n;
   }
 
-  public boolean kingAttacked(long[] bb, boolean whiteSide) {
+  public static boolean kingAttacked(long[] bb, boolean whiteSide) {
     long occ =  bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
     int kSq = Long.numberOfTrailingZeros(whiteSide ? bb[WK] : bb[BK]);
     return attackersToSquare(bb, occ, kSq, /*usIsWhite=*/whiteSide) != 0;

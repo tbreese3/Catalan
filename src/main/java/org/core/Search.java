@@ -1,4 +1,11 @@
-package org.engine;
+package org.core;
+
+import org.engine.Eval;
+import org.engine.MoveFactory;
+import org.engine.MoveGenerator;
+import org.engine.PositionFactory;
+import org.engine.TranspositionTable;
+import org.engine.MoveOrderer;
 
 import java.util.ArrayList;
 import java.util.List;

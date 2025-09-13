@@ -14,9 +14,9 @@ public final class PositionFactory {
   final static int COOKIE_SP = 16;
   final static int COOKIE_BASE = 17;
   final static int COOKIE_CAP = MAX_MOVE;
-  final static int HIST_SP = COOKIE_BASE + COOKIE_CAP; // number of stored history entries
-  final static int HIST_BASE = HIST_SP + 1;            // base index of zobrist history
-  final static int HIST_CAP = MAX_MOVE;                // history capacity
+  final static int HIST_SP = COOKIE_BASE + COOKIE_CAP;
+  final static int HIST_BASE = HIST_SP + 1;
+  final static int HIST_CAP = MAX_MOVE;
   final static int BB_LEN = HIST_BASE + HIST_CAP;
 
   final static long EP_NONE = 63;
@@ -27,15 +27,15 @@ public final class PositionFactory {
   final static long EP_MASK = 0x3FL << EP_SHIFT;
   final static int HC_SHIFT = 11;
   final static long HC_MASK = 0x7FL << HC_SHIFT;
-  final static int FM_SHIFT = 18;
-  final static long FM_MASK = 0x1FFL << FM_SHIFT;
+  private static final int FM_SHIFT = 18;
+  private static final long FM_MASK = 0x1FFL << FM_SHIFT;
 
-  public static final long[][] PIECE_SQUARE = new long[12][64];
-  public static final long[]   CASTLING     = new long[16];
-  public static final long[]   EP_FILE      = new long[8];
-  public static final long     SIDE_TO_MOVE;
-  public static final long     LIGHT_SQUARES;
-  public static final long     DARK_SQUARES;
+  private static final long[][] PIECE_SQUARE = new long[12][64];
+  private static final long[]   CASTLING     = new long[16];
+  private static final long[]   EP_FILE      = new long[8];
+  private static final long     SIDE_TO_MOVE;
+  private static final long     LIGHT_SQUARES;
+  private static final long     DARK_SQUARES;
 
   private static final short[] CR_MASK_LOST_FROM = new short[64];
   private static final short[] CR_MASK_LOST_TO   = new short[64];
@@ -87,7 +87,7 @@ public final class PositionFactory {
     DARK_SQUARES  = ~light;
   }
 
-  public long[] fromFen(String fen) {
+  public static long[] fromFen(String fen) {
     long[] bb = fenToBitboards(fen);
     bb[COOKIE_SP] = 0;
     bb[DIFF_META] = bb[META];
@@ -98,7 +98,7 @@ public final class PositionFactory {
     return bb;
   }
 
-  public String toFen(long[] bb)
+  public static String toFen(long[] bb)
   {
     StringBuilder sb = new StringBuilder(64);
     for (int rank = 7; rank >= 0; --rank) {
@@ -141,12 +141,12 @@ public final class PositionFactory {
     return sb.toString();
   }
 
-  public long zobrist(long[] bb)
+  public static long zobrist(long[] bb)
   {
     return bb[HASH];
   }
 
-  private char pieceCharAt(long bb[], int sq) {
+  private static char pieceCharAt(long bb[], int sq) {
     for (int i = 0; i < 12; ++i) if ((bb[i] & (1L << sq)) != 0) return "PNBRQKpnbrqk".charAt(i);
     return 0;
   }
@@ -155,24 +155,24 @@ public final class PositionFactory {
     return (bb[META] & STM_MASK) == 0;
   }
 
-  public int halfmoveClock(long[] bb) {
+  public static int halfmoveClock(long[] bb) {
     return (int) ((bb[META] & HC_MASK) >>> HC_SHIFT);
   }
 
-  private int fullmoveNumber(long[] bb) {
+  private static int fullmoveNumber(long[] bb) {
     return 1 + (int) ((bb[META] & FM_MASK) >>> FM_SHIFT);
   }
 
-  private int castlingRights(long[] bb) {
+  private static int castlingRights(long[] bb) {
     return (int) ((bb[META] & CR_MASK) >>> CR_SHIFT);
   }
 
-  private int enPassantSquare(long[] bb) {
+  private static int enPassantSquare(long[] bb) {
     int e = (int) ((bb[META] & EP_MASK) >>> EP_SHIFT);
     return e == EP_NONE ? -1 : e;
   }
 
-  public boolean makeMoveInPlace(long[] bb, int mv, MoveGenerator gen) {
+  public static boolean makeMoveInPlace(long[] bb, int mv) {
     int from  = MoveFactory.GetFrom(mv);
     int to    = MoveFactory.GetTo(mv);
     int type  = MoveFactory.GetFlags(mv);
@@ -183,7 +183,7 @@ public final class PositionFactory {
     long    fromBit = 1L << from;
     long    toBit   = 1L << to;
 
-    if (type == MoveFactory.FLAG_CASTLE && !gen.castleLegal(bb, from, to))
+    if (type == MoveFactory.FLAG_CASTLE && !MoveGenerator.castleLegal(bb, from, to))
       return false;
 
     long h        = bb[HASH];
@@ -285,7 +285,7 @@ public final class PositionFactory {
     bb[META]      = meta;
     bb[HASH]      = h;
 
-    if (gen.kingAttacked(bb, white)) {
+    if (MoveGenerator.kingAttacked(bb, white)) {
       bb[HASH] = oldHash;
       fastUndo(bb);
       bb[COOKIE_SP] = sp;
@@ -303,7 +303,7 @@ public final class PositionFactory {
     return true;
   }
 
-  public void undoMoveInPlace(long[] bb) {
+  public static void undoMoveInPlace(long[] bb) {
     long diff   = bb[DIFF_INFO];
     long meta  = bb[DIFF_META];
 
@@ -496,7 +496,7 @@ public final class PositionFactory {
     return bb;
   }
 
-  public long fullHash(long[] bb) {
+  public static long fullHash(long[] bb) {
     long k = 0;
     for (int pc = WP; pc <= BK; ++pc) {
       long bits = bb[pc];
@@ -520,16 +520,16 @@ public final class PositionFactory {
     return k;
   }
 
-  public boolean isDraw(long[] bb) {
+  public static boolean isDraw(long[] bb) {
     if (isRepetition(bb)) return true;
     if (isInsufficientMaterial(bb)) return true;
     if (halfmoveClock(bb) >= 100) return true;
     return false;
   }
 
-  private boolean isRepetition(long[] bb) { return isRepetition(bb, 3); }
+  private static boolean isRepetition(long[] bb) { return isRepetition(bb, 3); }
 
-  private boolean isRepetition(long[] bb, int count) {
+  private static boolean isRepetition(long[] bb, int count) {
     int hsp = (int) bb[HIST_SP];
     int i = Math.min(hsp - 1, halfmoveClock(bb));
     if (hsp >= 4) {
@@ -543,7 +543,7 @@ public final class PositionFactory {
     return false;
   }
 
-  public boolean isInsufficientMaterial(long[] bb) {
+  public static boolean isInsufficientMaterial(long[] bb) {
     if ( (bb[WQ] | bb[BQ] | bb[WR] | bb[BR]) != 0L ) return false;
 
     long pawns = bb[WP] | bb[BP];
@@ -592,9 +592,8 @@ public final class PositionFactory {
     return ((r + f) & 1) != 0;
   }
 
-  public boolean isInCheck(long[] bb) {
-    MoveGenerator gen = new MoveGenerator();
-    return gen.kingAttacked(bb, whiteToMove(bb));
+  public static boolean isInCheck(long[] bb) {
+    return MoveGenerator.kingAttacked(bb, whiteToMove(bb));
   }
 
   private static long packDiff(int from, int to, int cap, int mover, int typ, int pro) {

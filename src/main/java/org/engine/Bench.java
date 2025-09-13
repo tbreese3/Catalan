@@ -18,16 +18,13 @@ public final class Bench {
 	private Bench() {}
 
 	public static void run(int depth) {
-		PositionFactory pf = new PositionFactory();
-		MoveGenerator gen = new MoveGenerator();
-
 		long totalNodes = 0L;
 		long totalTimeMs = 0L;
 
 		for (String fen : BENCH_FENS) {
-			long[] board = pf.fromFen(fen);
+			long[] board = PositionFactory.fromFen(fen);
 			long t0 = System.nanoTime();
-			long nodes = perft(pf, gen, board, depth);
+			long nodes = perft(board, depth);
 			long ms = (System.nanoTime() - t0) / 1_000_000L;
 			totalNodes += nodes;
 			totalTimeMs += ms;
@@ -39,17 +36,17 @@ public final class Bench {
 		System.out.println("benchok");
 	}
 
-	private static long perft(PositionFactory pf, MoveGenerator gen, long[] board, int depth) {
+	private static long perft(long[] board, int depth) {
 		if (depth == 0) return 1L;
 		long nodes = 0L;
 		int[] moves = new int[256];
-		int n = gen.generateCaptures(board, moves, 0);
-		n = gen.generateQuiets(board, moves, n);
+		int n = MoveGenerator.generateCaptures(board, moves, 0);
+		n = MoveGenerator.generateQuiets(board, moves, n);
 		for (int i = 0; i < n; i++) {
 			int mv = moves[i];
-			if (!pf.makeMoveInPlace(board, mv, gen)) continue;
-			nodes += perft(pf, gen, board, depth - 1);
-			pf.undoMoveInPlace(board);
+			if (!PositionFactory.makeMoveInPlace(board, mv)) continue;
+			nodes += perft(board, depth - 1);
+			PositionFactory.undoMoveInPlace(board);
 		}
 		return nodes;
 	}

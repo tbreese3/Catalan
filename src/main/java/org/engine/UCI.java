@@ -12,8 +12,7 @@ import java.util.StringTokenizer;
  */
 public class UCI {
 
-    private final PositionFactory pos = new PositionFactory();
-    private final long[] board = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"); // replaced on position commands
+    private final long[] board = PositionFactory.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     private final Search search = new Search();
     private final TimeManager timeManager = new TimeManager();
     private Thread searchThread;
@@ -39,7 +38,7 @@ public class UCI {
             } else if (line.startsWith("setoption")) {
                 // Ignored for now
             } else if (line.equals("ucinewgame")) {
-                long[] fresh = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+                long[] fresh = PositionFactory.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 System.arraycopy(fresh, 0, board, 0, fresh.length);
                 TranspositionTable.TT.clear();
             } else if (line.startsWith("position")) {
@@ -63,7 +62,7 @@ public class UCI {
         String token = st.nextToken();
         long[] tmp;
         if ("startpos".equals(token)) {
-            tmp = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+            tmp = PositionFactory.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
         } else if ("fen".equals(token)) {
             StringBuilder fen = new StringBuilder();
             int parts = 0;
@@ -77,7 +76,7 @@ public class UCI {
                 fen.append(t);
                 parts++;
             }
-            tmp = pos.fromFen(fen.toString());
+            tmp = PositionFactory.fromFen(fen.toString());
         } else {
             return;
         }
@@ -96,7 +95,7 @@ public class UCI {
         for (; idx < tokens.size(); idx++) {
             String mv = tokens.get(idx);
             int move = uciToMove(mv);
-            if (move != 0) pos.makeMoveInPlace(board, move, new org.engine.MoveGenerator());
+            if (move != 0) PositionFactory.makeMoveInPlace(board, move);
         }
     }
 

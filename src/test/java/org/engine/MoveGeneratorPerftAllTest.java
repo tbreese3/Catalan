@@ -14,10 +14,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class MoveGeneratorPerftAllTest {
-
-    private static final PositionFactory POS_FACTORY = new PositionFactory();
-    private static final MoveGenerator   GEN         = new MoveGenerator();
-
     private record Vec(String fen,int depth,long expNodes,long expPseudo,
                        long expCaps,long expQuiets,long expEvas) {}
 
@@ -58,7 +54,7 @@ public class MoveGeneratorPerftAllTest {
     @ParameterizedTest(name="xPerft {index}")
     @MethodSource("vecStream")
     void perft(Vec v){
-        long[] root = POS_FACTORY.fromFen(v.fen());
+        long[] root = PositionFactory.fromFen(v.fen());
         C c = new C();
 
         long t0 = System.nanoTime();
@@ -118,18 +114,18 @@ public class MoveGeneratorPerftAllTest {
         if (depth == 0){ return 1; }
 
         boolean stmWhite = (bb[META] & 1L) == 0;
-        boolean inCheck  = GEN.kingAttacked(bb, stmWhite);
+        boolean inCheck  = MoveGenerator.kingAttacked(bb, stmWhite);
 
         int[] moves = MOVES[ply];
         int legalCnt;
 
         if (inCheck){
-            legalCnt     = GEN.generateEvasions(bb, moves, 0);
+            legalCnt     = MoveGenerator.generateEvasions(bb, moves, 0);
             cnt.evas    += legalCnt;
             cnt.pseudo  += legalCnt;
         } else {
-            int caps     = GEN.generateCaptures(bb, moves, 0);
-            int total    = GEN.generateQuiets  (bb, moves, caps);
+            int caps     = MoveGenerator.generateCaptures(bb, moves, 0);
+            int total    = MoveGenerator.generateQuiets  (bb, moves, caps);
             int quiets   = total - caps;
 
             legalCnt     = total;
@@ -144,11 +140,11 @@ public class MoveGeneratorPerftAllTest {
 
             if (capturesKing(mv, bb, stmWhite))
                 throw new AssertionError("Generated king capture: "
-                        + moveToUci(mv) + "  FEN " + POS_FACTORY.toFen(bb));
+                        + moveToUci(mv) + "  FEN " + PositionFactory.toFen(bb));
 
-            if (!POS_FACTORY.makeMoveInPlace(bb, mv, GEN)) continue;
+            if (!PositionFactory.makeMoveInPlace(bb, mv)) continue;
             nodes += perft(bb, depth-1, ply+1, cnt);
-            POS_FACTORY.undoMoveInPlace(bb);
+            PositionFactory.undoMoveInPlace(bb);
         }
         return nodes;
     }
