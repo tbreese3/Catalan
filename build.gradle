@@ -94,12 +94,26 @@ tasks.register('writeLauncher') {
 setlocal
 set "HERE=%~dp0"
 set "JAVA=%HERE%jre\\bin\\java.exe"
-if not exist "%JAVA%" (
-  echo ERROR: Bundled JRE not found: "%JAVA%"
-  exit /b 1
+set "MAX_TRIES=40"
+set /a "TRY=0"
+set "EXITCODE=1"
+
+:attempt
+if exist "%JAVA%" (
+  "%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
+  set "EXITCODE=%ERRORLEVEL%"
+  if "%EXITCODE%"=="0" goto success
 )
-"%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
-endlocal
+set /a TRY+=1
+if %TRY% GEQ %MAX_TRIES% goto fail
+timeout /t 1 /nobreak >nul
+goto attempt
+
+:success
+endlocal & exit /b 0
+
+:fail
+endlocal & exit /b %EXITCODE%
 """
     }
 }
