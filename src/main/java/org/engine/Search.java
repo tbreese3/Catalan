@@ -178,8 +178,7 @@ public final class Search {
 			int ttDepth = TranspositionTable.TT.readDepth(bucket, slot);
 			int ttBound = TranspositionTable.TT.readBound(bucket, slot);
 			int ttScore = TranspositionTable.scoreFromTT(TranspositionTable.TT.readScore(bucket, slot), ply);
-			int halfMoves = pos.halfmoveClock(board);
-			if (!pvNode && ttDepth >= depth && halfMoves < 90) {
+			if (!pvNode && ttDepth >= depth) {
 				if ((ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta)
 						|| (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha)
 						|| (ttBound == TranspositionTable.BOUND_EXACT)) {
@@ -266,6 +265,7 @@ public final class Search {
 	private int quiescence(long[] board, int ply, int alpha, int beta, boolean pvNode) {
 		if (stopCheck()) return 0;
 		nodes++;
+		selDepth = Math.max(selDepth, ply);
 
 		if (pos.isDraw(board)) return 0;
 
@@ -283,15 +283,25 @@ public final class Search {
 		}
 
 		boolean inCheck = pos.isInCheck(board);
+		int originalAlpha = alpha;
 
 		int standPat;
 		if (!inCheck) {
-			standPat = evaluate(board);
+			int rawEval;
+			if (ttHit) rawEval = TranspositionTable.TT.readEval(bucket, slot); else rawEval = evaluate(board);
+			standPat = rawEval;
 			if (standPat >= beta) return standPat;
 			if (standPat > alpha) alpha = standPat;
+			boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
+			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, pvNode, pvNode || prevWasPV);
 		} else {
 			standPat = -INFTY;
 		}
+
+		// Mate distance pruning
+		alpha = Math.max(alpha, -MATE_VALUE + ply);
+		beta  = Math.min(beta,  MATE_VALUE - (ply + 1));
+		if (alpha >= beta) return alpha;
 
 		int[] moves = moveBuffers[ply];
 		int moveCount;
@@ -339,14 +349,17 @@ public final class Search {
 			}
 		}
 
-		if(!movePlayed) {
+		if (!movePlayed) {
 			if (inCheck) {
-				return -MATE_VALUE + ply;
+				bestScore = -MATE_VALUE + ply;
 			}
 		}
 
 		int bound;
-		if (bestScore >= beta) bound = TranspositionTable.BOUND_LOWER; else bound = TranspositionTable.BOUND_UPPER;
+		if (bestScore >= beta) bound = TranspositionTable.BOUND_LOWER;
+		else if (alpha != originalAlpha) bound = TranspositionTable.BOUND_EXACT;
+		else bound = TranspositionTable.BOUND_UPPER;
+
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
 		int rawEval = (standPat != -INFTY) ? standPat : evaluate(board);
 		int bestMove = se.pvLength > 0 ? se.pv[0] : 0;
