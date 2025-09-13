@@ -20,7 +20,7 @@ public final class Search {
 	}
 
 	public static final class Result {
-		public Integer bestMove;
+		public int bestMove;
 		public int scoreCp;
 		public List<Integer> pv = new ArrayList<>();
 	}
@@ -140,7 +140,7 @@ public final class Search {
 			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 			List<Integer> pv = extractPV(0);
-			previousBest = pv.isEmpty() ? null : pv.get(0);
+			previousBest = pv.isEmpty() ? 0 : pv.get(0);
 			previousScore = score;
 
 			result.bestMove = previousBest;
