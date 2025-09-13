@@ -32,5 +32,19 @@ public final class MoveFactory {
   public static int GetFlags(int mv) {
     return (mv >>> 14) & 0x3;
   }
+
+  public static String moveToUci(int mv) {
+    int from = GetFrom(mv);
+    int to = GetTo(mv);
+    int promo = GetPromotion(mv);
+    int flags = GetFlags(mv);
+    char a = (char) ('a' + (from & 7));
+    char b = (char) ('1' + (from >>> 3));
+    char c = (char) ('a' + (to & 7));
+    char d = (char) ('1' + (to >>> 3));
+    if (flags != FLAG_PROMOTION) return "" + a + b + c + d;
+    char p = switch (promo) { case 0 -> 'n'; case 1 -> 'b'; case 2 -> 'r'; case 3 -> 'q'; default -> 'q'; };
+    return "" + a + b + c + d + p;
+  }
 }
 

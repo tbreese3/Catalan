@@ -21,7 +21,7 @@ test { useJUnitPlatform() }
 /** App + packaging settings */
 ext {
     appName       = 'Catalan'
-    mainClassName = 'org.main.Main'
+    mainClassName = 'org.engine.Main'
     jreMajor      = '24'
 
     jreWinZipUrl  = "https://api.adoptium.net/v3/binary/latest/${jreMajor}/ga/windows/x64/jre/hotspot/normal/eclipse"

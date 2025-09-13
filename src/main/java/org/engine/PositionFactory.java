@@ -10,10 +10,14 @@ public final class PositionFactory {
   final static int DIFF_INFO = 14;
 
   final static int HASH = 15;
+  public static final int MAX_MOVE = 1000;
   final static int COOKIE_SP = 16;
   final static int COOKIE_BASE = 17;
-  final static int COOKIE_CAP = 1000;
-  final static int BB_LEN = COOKIE_BASE + COOKIE_CAP;
+  final static int COOKIE_CAP = MAX_MOVE;
+  final static int HIST_SP = COOKIE_BASE + COOKIE_CAP; // number of stored history entries
+  final static int HIST_BASE = HIST_SP + 1;            // base index of zobrist history
+  final static int HIST_CAP = MAX_MOVE;                // history capacity
+  final static int BB_LEN = HIST_BASE + HIST_CAP;
 
   final static long EP_NONE = 63;
   final static long STM_MASK = 1L;
@@ -30,6 +34,8 @@ public final class PositionFactory {
   public static final long[]   CASTLING     = new long[16];
   public static final long[]   EP_FILE      = new long[8];
   public static final long     SIDE_TO_MOVE;
+  public static final long     LIGHT_SQUARES;
+  public static final long     DARK_SQUARES;
 
   private static final short[] CR_MASK_LOST_FROM = new short[64];
   private static final short[] CR_MASK_LOST_TO   = new short[64];
@@ -71,6 +77,14 @@ public final class PositionFactory {
     for (int f = 0; f < 8; ++f) {
       EP_FILE[f] = rnd.nextLong();
     }
+
+    long light = 0L;
+    for (int sq = 0; sq < 64; ++sq) {
+      int r = sq >>> 3, c = sq & 7;
+      if (((r + c) & 1) != 0) light |= 1L << sq; // light if (rank+file) is odd (A1 is dark)
+    }
+    LIGHT_SQUARES = light;
+    DARK_SQUARES  = ~light;
   }
 
   public long[] fromFen(String fen) {
@@ -79,6 +93,8 @@ public final class PositionFactory {
     bb[DIFF_META] = bb[META];
     bb[DIFF_INFO] = 0;
     bb[HASH] = fullHash(bb);
+    bb[HIST_SP] = 1;
+    bb[HIST_BASE] = bb[HASH];
     return bb;
   }
 
@@ -139,7 +155,7 @@ public final class PositionFactory {
     return (bb[META] & STM_MASK) == 0;
   }
 
-  private int halfmoveClock(long[] bb) {
+  public int halfmoveClock(long[] bb) {
     return (int) ((bb[META] & HC_MASK) >>> HC_SHIFT);
   }
 
@@ -278,6 +294,12 @@ public final class PositionFactory {
       bb[DIFF_META] = (int) (prev >>> 32);
       return false;
     }
+    // push zobrist into history
+    int hsp = (int) bb[HIST_SP];
+    if (hsp < HIST_CAP) {
+      bb[HIST_BASE + hsp] = bb[HASH];
+      bb[HIST_SP] = hsp + 1;
+    }
     return true;
   }
 
@@ -345,24 +367,14 @@ public final class PositionFactory {
     }
 
     bb[HASH] = h;
+    // pop history (keep at least the initial entry)
+    int hsp = (int) bb[HIST_SP];
+    if (hsp > 1) bb[HIST_SP] = hsp - 1;
   }
 
   private static int inferMover(long[] bb, int from) {
-    long fromBit = 1L << from;
-
-    if ((bb[WP] & fromBit) != 0) return WP;
-    if ((bb[WN] & fromBit) != 0) return WN;
-    if ((bb[WB] & fromBit) != 0) return WB;
-    if ((bb[WR] & fromBit) != 0) return WR;
-    if ((bb[WQ] & fromBit) != 0) return WQ;
-    if ((bb[WK] & fromBit) != 0) return WK;
-    if ((bb[BP] & fromBit) != 0) return BP;
-    if ((bb[BN] & fromBit) != 0) return BN;
-    if ((bb[BB] & fromBit) != 0) return BB;
-    if ((bb[BR] & fromBit) != 0) return BR;
-    if ((bb[BQ] & fromBit) != 0) return BQ;
-    if ((bb[BK] & fromBit) != 0) return BK;
-    return whiteToMove(bb) ? WP : BP;
+    int p = pieceAt(bb, from);
+    return p != -1 ? p : (whiteToMove(bb) ? WP : BP);
   }
 
   private static void fastUndo(long[] bb) {
@@ -508,6 +520,83 @@ public final class PositionFactory {
     return k;
   }
 
+  public boolean isDraw(long[] bb) {
+    if (isRepetition(bb)) return true;
+    if (isInsufficientMaterial(bb)) return true;
+    if (halfmoveClock(bb) >= 100) return true;
+    return false;
+  }
+
+  private boolean isRepetition(long[] bb) { return isRepetition(bb, 3); }
+
+  private boolean isRepetition(long[] bb, int count) {
+    int hsp = (int) bb[HIST_SP];
+    int i = Math.min(hsp - 1, halfmoveClock(bb));
+    if (hsp >= 4) {
+      long lastKey = bb[HIST_BASE + hsp - 1];
+      int rep = 0;
+      for (int x = 4; x <= i; x += 2) {
+        long k = bb[HIST_BASE + hsp - x - 1];
+        if (k == lastKey && ++rep >= count - 1) return true;
+      }
+    }
+    return false;
+  }
+
+  public boolean isInsufficientMaterial(long[] bb) {
+    if ( (bb[WQ] | bb[BQ] | bb[WR] | bb[BR]) != 0L ) return false;
+
+    long pawns = bb[WP] | bb[BP];
+    if (pawns == 0L) {
+      long occ = bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
+      long whiteAll = bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK];
+      long blackAll = bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
+
+      long count = Long.bitCount(occ);
+      int whiteCount = Long.bitCount(whiteAll);
+      int blackCount = Long.bitCount(blackAll);
+
+      if (count == 4) {
+        int whiteBishopCount = Long.bitCount(bb[WB]);
+        int blackBishopCount = Long.bitCount(bb[BB]);
+        if (whiteCount > 1 && blackCount > 1) {
+          boolean wbLight = firstBishopIsLight(bb[WB]);
+          boolean bbLight = firstBishopIsLight(bb[BB]);
+          return !((whiteBishopCount == 1 && blackBishopCount == 1) && (wbLight != bbLight));
+        }
+        if (whiteCount == 3 || blackCount == 3) {
+          if (whiteBishopCount == 2 && ( (LIGHT_SQUARES & bb[WB]) == 0L || (DARK_SQUARES & bb[WB]) == 0L )) {
+            return true;
+          } else return blackBishopCount == 2 && ( (LIGHT_SQUARES & bb[BB]) == 0L || (DARK_SQUARES & bb[BB]) == 0L );
+        } else {
+          return Long.bitCount(bb[WN]) == 2 || Long.bitCount(bb[BN]) == 2;
+        }
+      } else {
+        boolean whiteOnlyKB = ((bb[WK] | bb[WB]) == whiteAll);
+        boolean blackOnlyKB = ((bb[BK] | bb[BB]) == blackAll);
+        if (whiteOnlyKB && blackOnlyKB) {
+          return (((LIGHT_SQUARES & bb[WB]) == 0L) && ((LIGHT_SQUARES & bb[BB]) == 0L))
+                  || (((DARK_SQUARES & bb[WB]) == 0L) && ((DARK_SQUARES & bb[BB]) == 0L));
+        }
+        return count < 4;
+      }
+    }
+
+    return false;
+  }
+
+  private static boolean firstBishopIsLight(long bishops) {
+    if (bishops == 0L) return false;
+    int sq = Long.numberOfTrailingZeros(bishops);
+    int r = sq >>> 3, f = sq & 7;
+    return ((r + f) & 1) != 0;
+  }
+
+  public boolean isInCheck(long[] bb) {
+    MoveGenerator gen = new MoveGenerator();
+    return gen.kingAttacked(bb, whiteToMove(bb));
+  }
+
   private static long packDiff(int from, int to, int cap, int mover, int typ, int pro) {
     return (from) | ((long) to << 6) | ((long) cap << 12) | ((long) mover << 16) | ((long) typ << 20) | ((long) pro << 22);
   }
@@ -518,4 +607,21 @@ public final class PositionFactory {
   private static int dfMover(long d) { return (int) ((d >>> 16) & 0x0F); }
   private static int dfType(long d) { return (int) ((d >>> 20) & 0x03); }
   private static int dfPromo(long d) { return (int) ((d >>> 22) & 0x03); }
+
+  public static int pieceAt(long[] bb, int sq) {
+    long bit = 1L << sq;
+    if ((bb[WP] & bit) != 0) return WP;
+    if ((bb[WN] & bit) != 0) return WN;
+    if ((bb[WB] & bit) != 0) return WB;
+    if ((bb[WR] & bit) != 0) return WR;
+    if ((bb[WQ] & bit) != 0) return WQ;
+    if ((bb[WK] & bit) != 0) return WK;
+    if ((bb[BP] & bit) != 0) return BP;
+    if ((bb[BN] & bit) != 0) return BN;
+    if ((bb[BB] & bit) != 0) return BB;
+    if ((bb[BR] & bit) != 0) return BR;
+    if ((bb[BQ] & bit) != 0) return BQ;
+    if ((bb[BK] & bit) != 0) return BK;
+    return -1;
+  }
 }
