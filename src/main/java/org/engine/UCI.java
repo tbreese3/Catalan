@@ -219,7 +219,7 @@ public class UCI {
                 for (int m : pv) sb.append(' ').append(org.engine.MoveFactory.moveToUci(m));
                 System.out.println(sb.toString());
             });
-            if (res.bestMove != null) {
+            if (res.bestMove != 0) {
                 System.out.println("bestmove " + org.engine.MoveFactory.moveToUci(res.bestMove));
             } else {
                 System.out.println("bestmove 0000");
