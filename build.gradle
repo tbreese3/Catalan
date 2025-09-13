@@ -94,26 +94,34 @@ tasks.register('writeLauncher') {
 setlocal
 set "HERE=%~dp0"
 set "JAVA=%HERE%jre\\bin\\java.exe"
-set "MAX_TRIES=40"
-set /a "TRY=0"
-set "EXITCODE=1"
+set "RETRIES=15"
+set "DELAY=1"
+set /a "ATTEMPT=0"
 
-:attempt
-if exist "%JAVA%" (
-  "%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
-  set "EXITCODE=%ERRORLEVEL%"
-  if "%EXITCODE%"=="0" goto success
+:wait_for_java
+if exist "%JAVA%" goto :run_app
+set /a ATTEMPT+=1
+if %ATTEMPT% GEQ %RETRIES% (
+  echo ERROR: Bundled JRE not found after %RETRIES% attempts: "%JAVA%"
+  exit /b 1
 )
-set /a TRY+=1
-if %TRY% GEQ %MAX_TRIES% goto fail
-timeout /t 1 /nobreak >nul
-goto attempt
+timeout /t %DELAY% /nobreak >nul
+goto :wait_for_java
 
-:success
-endlocal & exit /b 0
-
-:fail
-endlocal & exit /b %EXITCODE%
+:run_app
+"%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
+if %ERRORLEVEL% EQU 0 (
+  endlocal
+  exit /b 0
+)
+set /a ATTEMPT+=1
+if %ATTEMPT% GEQ %RETRIES% (
+  echo ERROR: App failed to start after %RETRIES% attempts. Last exit code: %ERRORLEVEL%
+  endlocal
+  exit /b %ERRORLEVEL%
+)
+timeout /t %DELAY% /nobreak >nul
+goto :run_app
 """
     }
 }
