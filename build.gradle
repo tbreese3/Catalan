@@ -74,31 +74,18 @@ tasks.register('unzipGraal', Copy) {
 graalvmNative {
     toolchainDetection = true
     binaries {
-        def pgoProfilePath = project.findProperty('pgoProfile') ?: layout.projectDirectory.file('default.iprof').asFile.absolutePath
-        all {
+        main {
             imageName = appName
+            mainClass = mainClassName
             jvmArgs.addAll('--add-modules=jdk.incubator.vector')
             buildArgs.addAll(
                 '--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
                 '-H:+VectorAPISupport',
-                '-J--add-modules=jdk.incubator.vector',
-                '--march=native',
-                '-O3',
-                '--gc=G1',
-                '--initialize-at-build-time=org.engine'
+                '-J--add-modules=jdk.incubator.vector'
             )
             resources.autodetect()
-        }
-        main { }
-        pgoInstrumented {
-            imageName = "${appName}-instr"
-            buildArgs.add('-H:PGOInstrument')
-        }
-        pgoOptimized {
-            imageName = "${appName}-pgo"
-            buildArgs.add("-H:PGOProfiles=${pgoProfilePath}")
         }
     }
 }
@@ -143,25 +130,3 @@ tasks.register('prepareGraalToolchain') {
 
 // Make nativeCompile depend on prepared toolchain so devs can just run it
 tasks.named('nativeCompile') { dependsOn 'prepareGraalToolchain' }
-
-/** Convenience native tasks */
-tasks.register('nativeFastNoGC') {
-    group = 'distribution'
-    description = 'Build native exe with Epsilon GC (no GC) for max throughput.'
-    dependsOn tasks.named('nativeCompile')
-    doFirst {
-        graalvmNative.binaries.main.get().buildArgs.add('--gc=epsilon')
-    }
-}
-
-tasks.register('nativeInstrument') {
-    group = 'distribution'
-    description = 'Build PGO-instrumented native exe (run it to produce default.iprof).'
-    dependsOn tasks.named('pgoInstrumentedCompile')
-}
-
-tasks.register('nativePGO') {
-    group = 'distribution'
-    description = 'Build PGO-optimized native exe using default.iprof (or -PpgoProfile=...).'
-    dependsOn tasks.named('pgoOptimizedCompile')
-}
