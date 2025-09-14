@@ -77,22 +77,23 @@ graalvmNative {
         def pgoProfilePath = project.findProperty('pgoProfile') ?: layout.projectDirectory.file('default.iprof').asFile.absolutePath
         all {
             imageName = appName
-            jvmArgs.add('--add-modules=jdk.incubator.vector')
+            jvmArgs.addAll('--add-modules=jdk.incubator.vector')
             buildArgs.addAll(
                 '--no-fallback',
+                '--enable-url-protocols=http,https',
                 '-H:+UnlockExperimentalVMOptions',
                 '-H:+VectorAPISupport',
                 '-J--add-modules=jdk.incubator.vector',
                 '--march=x86-64-v3',
                 '-O3',
+                '--gc=G1',
                 '--initialize-at-build-time=org.engine',
-                '-H:Class=org.engine.Main'
+                '-H:NativeLinkerOption=/OPT:REF',
+                '-H:NativeLinkerOption=/OPT:ICF'
             )
             resources.autodetect()
         }
-        main {
-            mainClass.set(mainClassName)
-        }
+        main { }
         pgoInstrumented {
             imageName = "${appName}-instr"
             buildArgs.add('-H:PGOInstrument')
@@ -145,6 +146,15 @@ tasks.register('prepareGraalToolchain') {
 // Make nativeCompile depend on prepared toolchain so devs can just run it
 tasks.named('nativeCompile') { dependsOn 'prepareGraalToolchain' }
 
+/** Convenience native tasks */
+tasks.register('nativeFastNoGC') {
+    group = 'distribution'
+    description = 'Build native exe with Epsilon GC (no GC) for max throughput.'
+    dependsOn tasks.named('nativeCompile')
+    doFirst {
+        graalvmNative.binaries.main.get().buildArgs.add('--gc=epsilon')
+    }
+}
 
 tasks.register('nativeInstrument') {
     group = 'distribution'
