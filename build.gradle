@@ -81,15 +81,15 @@ graalvmNative {
             buildArgs.addAll(
                 '--no-fallback',
                 '--enable-url-protocols=http,https',
-                '-H:+UnlockExperimentalVMOptions',
+                '--report-unsupported-elements-at-runtime',
                 '-H:+VectorAPISupport',
                 '-J--add-modules=jdk.incubator.vector',
-                '--march=x86-64-v3',
+                '--march=native',
                 '-O3',
                 '--gc=G1',
                 '--initialize-at-build-time=org.engine',
-                '-H:NativeLinkerOption=/OPT:REF',
-                '-H:NativeLinkerOption=/OPT:ICF'
+                '-H:LinkerOption=/OPT:REF',
+                '-H:LinkerOption=/OPT:ICF'
             )
             resources.autodetect()
         }
