@@ -51,8 +51,24 @@ tasks.named('shadowJar') {
 
 def buildDirPath  = layout.buildDirectory
 
-// GraalVM reference download URL (not used by the build):
-// https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_windows-x64_bin.zip
+/** GraalVM download settings (JDK 24.0.2 for Windows x64) */
+ext {
+    graalVersion   = '24.0.2'
+    graalZipUrl    = "https://download.oracle.com/graalvm/24/archive/graalvm-jdk-${graalVersion}_windows-x64_bin.zip"
+}
+
+def graalDir      = layout.buildDirectory.dir("graalvm")
+def graalZipFile  = graalDir.map { it.file("graalvm.zip") }
+
+tasks.register('downloadGraal', de.undercouch.gradle.tasks.download.Download) {
+    src graalZipUrl; dest graalZipFile.get().asFile; overwrite false
+}
+
+tasks.register('unzipGraal', Copy) {
+    dependsOn 'downloadGraal'
+    from { zipTree(graalZipFile.get().asFile) }
+    into graalDir
+}
 
 // Ensure GraalVM plugin uses full settings
 graalvmNative {
@@ -90,17 +106,18 @@ graalvmNative {
     }
 }
 
-// If a local GraalVM exists, point the Native Build Tools launcher to it
-def localGraalHome = file('C:\\graalvm\\graalvm-jdk-24.0.2+11.1')
-if (localGraalHome.exists()) {
-    // Hint Gradle Toolchains to discover this installation (no download)
-    System.setProperty('org.gradle.java.installations.paths', localGraalHome.absolutePath)
-    graalvmNative {
-        binaries {
-            all {
-                javaLauncher.set(javaToolchains.launcherFor {
-                    languageVersion = JavaLanguageVersion.of(24)
-                })
+// If GraalVM was downloaded locally, point the GraalVM plugin launcher to it
+providers.provider {
+    def root = graalDir.get().asFile.listFiles()?.find { it.isDirectory() && it.name.toLowerCase().startsWith('graalvm-jdk-') }
+    if (root != null) {
+        graalvmNative {
+            binaries {
+                main {
+                    javaLauncher.set(javaToolchains.launcherFor {
+                        languageVersion = JavaLanguageVersion.of(24)
+                    })
+                    // Let Native Build Tools find native-image inside the selected launcher
+                }
             }
         }
     }
@@ -113,7 +130,22 @@ tasks.register('packageNative') {
     dependsOn tasks.named('nativeCompile')
 }
 
-// Toolchain auto-detection will be used if local GraalVM is not present
+/** Configure Gradle to see the downloaded GraalVM for this build */
+tasks.register('prepareGraalToolchain') {
+    dependsOn 'unzipGraal'
+    doLast {
+        def root = graalDir.get().asFile.listFiles().find { it.isDirectory() && it.name.toLowerCase().startsWith('graalvm-jdk-') }
+        if (root) {
+            println "Using GraalVM at: ${root.absolutePath}"
+            System.setProperty('org.gradle.java.installations.paths', root.absolutePath)
+        } else {
+            println 'No downloaded GraalVM found; relying on auto-detection.'
+        }
+    }
+}
+
+// Make nativeCompile depend on prepared toolchain so devs can just run it
+tasks.named('nativeCompile') { dependsOn 'prepareGraalToolchain' }
 
 
 tasks.register('nativeInstrument') {

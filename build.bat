@@ -18,16 +18,18 @@ set "OUT=%~f1"
 echo === Cleaning build ===
 call "%GRADLE%" --no-daemon --console=plain clean || exit /b 1
 
-echo === Looking for local GraalVM toolchain ===
-set "GRAAL_LOCAL=C:\graalvm\graalvm-jdk-24.0.2+11.1"
-if exist "%GRAAL_LOCAL%\bin\native-image.cmd" (
-  echo Using local GraalVM: %GRAAL_LOCAL%
-  set "JAVA_HOME=%GRAAL_LOCAL%"
+echo === Preparing GraalVM toolchain (download if needed) ===
+call "%GRADLE%" --no-daemon --console=plain prepareGraalToolchain || exit /b 1
+
+rem Discover downloaded GraalVM path and export JAVA_HOME/PATH for this process
+set "GRAAL_DL="
+for /f "delims=" %%D in ('dir /b /ad "build\graalvm\graalvm-jdk-*" 2^>nul') do set "GRAAL_DL=%CD%\build\graalvm\%%D"
+if defined GRAAL_DL (
+  echo Using downloaded GraalVM: %GRAAL_DL%
+  set "JAVA_HOME=%GRAAL_DL%"
   set "PATH=%JAVA_HOME%\bin;%PATH%"
 ) else (
-  echo Local GraalVM not found at %GRAAL_LOCAL%, relying on system/toolchains.
-  rem Reference download URL (not used by this script):
-  rem https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_windows-x64_bin.zip
+  echo No downloaded GraalVM found, relying on system/toolchains.
 )
 
 echo === Building GraalVM native exe ===
