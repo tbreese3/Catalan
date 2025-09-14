@@ -48,10 +48,12 @@ tasks.named('shadowJar') {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest { attributes 'Main-Class': mainClassName }
 }
+// Ensure the regular JAR also contains the Main-Class manifest
+tasks.named('jar') {
+    manifest { attributes 'Main-Class': mainClassName }
+}
 
 def buildDirPath  = layout.buildDirectory
-// Optional: CPU architecture for Native Image (e.g., 'native', 'haswell')
-def graalMarch = providers.gradleProperty('graalMarch').orNull
 
 /** GraalVM download settings (JDK 24.0.2 for Windows x64) */
 ext {
@@ -84,14 +86,10 @@ graalvmNative {
                 '--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
-                '-H:+VectorAPISupport'
+                '-H:+VectorAPISupport',
+                '--march=native',
+                "-H:Class=${mainClassName}"
             ])
-            if (graalMarch != null && graalMarch.trim()) {
-                buildArgs.add("--march=${graalMarch}".toString())
-            } else {
-                // Default to Haswell to enable BMI2/PEXT on most modern x86_64
-                buildArgs.add('--march=haswell')
-            }
             resources.autodetect()
         }
     }
