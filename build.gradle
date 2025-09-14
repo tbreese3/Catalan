@@ -77,16 +77,14 @@ graalvmNative {
         main {
             imageName = appName
             mainClass = mainClassName
-            jvmArgs.addAll('--add-modules=jdk.incubator.vector')
-            buildArgs.addAll(
-                '--no-fallback',
+            jvmArgs.add('--add-modules=jdk.incubator.vector')
+            buildArgs.addAll(['--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
                 '--march=x86-64-v3',
                 '-H:+VectorAPISupport',
                 '-O3',
-                '-J--add-modules=jdk.incubator.vector'
-            )
+                '-J--add-modules=jdk.incubator.vector'])
             resources.autodetect()
         }
     }
