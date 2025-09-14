@@ -76,9 +76,9 @@ graalvmNative {
     binaries {
         main {
             imageName.set(appName)
-            mainClass.set(mainClassName)
+            mainClass = mainClassName
             jvmArgs.add('--add-modules=jdk.incubator.vector')
-            buildArgs.addAll(['--no-fallback',
+            buildArgs.set(['--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
                 '--march=x86-64-v3',
