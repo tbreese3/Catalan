@@ -162,12 +162,11 @@ public final class Search {
 	}
 
 	private int negamax(long[] board, int depth, int ply, int alpha, int beta, boolean pvNode) {
+		StackEntry se = stack[ply];
+		se.pvLength = 0; // ensure child PV isn't copied from stale data on early returns
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
-
-		StackEntry se = stack[ply];
-		se.pvLength = 0;
 
 		if (pos.isDraw(board)) return 0;
 
@@ -263,6 +262,8 @@ public final class Search {
 	}
 
 	private int quiescence(long[] board, int ply, int alpha, int beta, boolean pvNode) {
+		StackEntry se = stack[ply];
+		se.pvLength = 0; // clear PV immediately to avoid stale tail if we stop early
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
@@ -314,9 +315,6 @@ public final class Search {
 		int[] qScores = moveScores[ply];
 		int ttMoveForQ = ttHit ? (TranspositionTable.TT.readPackedMove(bucket, slot) & 0xFFFF) : 0;
 		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ);
-
-		StackEntry se = stack[ply];
-		se.pvLength = 0;
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
