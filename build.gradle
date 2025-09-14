@@ -87,9 +87,7 @@ graalvmNative {
                 '--march=native',
                 '-O3',
                 '--gc=G1',
-                '--initialize-at-build-time=org.engine',
-                '-H:LinkerOption=/OPT:REF',
-                '-H:LinkerOption=/OPT:ICF'
+                '--initialize-at-build-time=org.engine'
             )
             resources.autodetect()
         }
