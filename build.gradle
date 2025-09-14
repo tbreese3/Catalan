@@ -83,8 +83,8 @@ graalvmNative {
                 '--march=native',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
-                '-H:+VectorAPISupport',
-                '-J--add-modules=jdk.incubator.vector'
+                '-H:+UnlockExperimentalVMOptions',
+                '-H:+VectorAPISupport'
             ])
             resources.autodetect()
         }
