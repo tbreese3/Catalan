@@ -82,6 +82,7 @@ graalvmNative {
                 '--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
+                '--march=x86-64-v3',
                 '-H:+VectorAPISupport',
                 '-O3',
                 '-J--add-modules=jdk.incubator.vector'
