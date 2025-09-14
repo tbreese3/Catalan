@@ -50,6 +50,8 @@ tasks.named('shadowJar') {
 }
 
 def buildDirPath  = layout.buildDirectory
+// Optional: CPU architecture for Native Image (e.g., 'native', 'haswell')
+def graalMarch = providers.gradleProperty('graalMarch').orNull
 
 /** GraalVM download settings (JDK 24.0.2 for Windows x64) */
 ext {
@@ -80,12 +82,16 @@ graalvmNative {
             jvmArgs.addAll(['--add-modules=jdk.incubator.vector'])
             buildArgs.addAll([
                 '--no-fallback',
-                '--march=native',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
-                '-H:+UnlockExperimentalVMOptions',
                 '-H:+VectorAPISupport'
             ])
+            if (graalMarch != null && graalMarch.trim()) {
+                buildArgs.add("--march=${graalMarch}".toString())
+            } else {
+                // Default to Haswell to enable BMI2/PEXT on most modern x86_64
+                buildArgs.add('--march=haswell')
+            }
             resources.autodetect()
         }
     }
