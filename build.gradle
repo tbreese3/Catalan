@@ -87,7 +87,7 @@ graalvmNative {
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
                 '-H:+VectorAPISupport',
-                '--march=native',
+                '--march=x86-64-v3',
                 "-H:Class=${mainClassName}"
             ])
             resources.autodetect()
