@@ -75,17 +75,16 @@ graalvmNative {
     toolchainDetection = true
     binaries {
         main {
-            imageName.set(appName)
+            imageName = appName
             mainClass = mainClassName
-            jvmArgs.add('--add-modules=jdk.incubator.vector')
-            buildArgs.set(['--no-fallback',
+            jvmArgs.addAll('--add-modules=jdk.incubator.vector')
+            buildArgs.addAll(
+                '--no-fallback',
                 '--enable-url-protocols=http,https',
                 '--report-unsupported-elements-at-runtime',
-                '--march=x86-64-v3',
                 '-H:+VectorAPISupport',
-                '-O3',
-                "-H:Class=${mainClassName}",
-                '-J--add-modules=jdk.incubator.vector'])
+                '-J--add-modules=jdk.incubator.vector'
+            )
             resources.autodetect()
         }
     }
