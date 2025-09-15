@@ -627,4 +627,27 @@ public final class MoveGenerator {
   public static long queenAtt(long occ, int sq) {
     return rookAtt(occ, sq) | bishopAtt(occ, sq);
   }
+
+  public int getFirstLegalMove(long[] bb) {
+    int[] mv = new int[256];
+    int n;
+    boolean inCheck = kingAttacked(bb, whiteToMove(bb));
+    if (inCheck) {
+      n = generateEvasions(bb, mv, 0);
+    } else {
+      n = generateCaptures(bb, mv, 0);
+      n = generateQuiets(bb, mv, n);
+    }
+    if (n == 0) return 0;
+
+    PositionFactory pos = new PositionFactory();
+    for (int i = 0; i < n; i++) {
+      int move = mv[i];
+      if (pos.makeMoveInPlace(bb, move, this)) {
+        pos.undoMoveInPlace(bb);
+        return move;
+      }
+    }
+    return 0;
+  }
 }

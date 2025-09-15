@@ -61,7 +61,6 @@ public final class Search {
 	private long hardStopTimeMs;
 	private long nodes;
 	private int selDepth;
-	private int completedDepth;
 	private StackEntry[] stack;
 	private final int[][] moveScores = new int[MAX_PLY + 5][MAX_MOVES];
 	private final int[][] moveBuffers = new int[MAX_PLY + 5][MAX_MOVES];
@@ -77,7 +76,6 @@ public final class Search {
 		startTimeMs = System.currentTimeMillis();
 		nodes = 0L;
 		selDepth = 0;
-		completedDepth = 0;
 		softStopTimeMs = limits.softMs > 0 ? startTimeMs + limits.softMs : Long.MAX_VALUE;
 		hardStopTimeMs = limits.hardMs > 0 ? startTimeMs + limits.hardMs : Long.MAX_VALUE;
 
@@ -96,9 +94,7 @@ public final class Search {
 		int maxDepth = limits.depth > 0 ? limits.depth : 64;
 
 		for (int depth = 1; depth <= maxDepth; depth++) {
-			long loopNow = System.currentTimeMillis();
-			if (stopRequested) break;
-			if (loopNow >= hardStopTimeMs && completedDepth > 1) break;
+			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 			int score;
 
@@ -126,9 +122,7 @@ public final class Search {
 
 				while (true) {
 					score = negamax(root, searchDepth, 0, alpha, beta, NodeType.rootNode);
-					long aspNow = System.currentTimeMillis();
-					if (stopRequested) break;
-					if (aspNow >= hardStopTimeMs && completedDepth > 1) break;
+					if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 					if (score <= alpha) {
 						beta  = (alpha + beta) / 2;
@@ -145,9 +139,7 @@ public final class Search {
 				}
 			}
 
-			long afterAspNow = System.currentTimeMillis();
-			if (stopRequested) break;
-			if (afterAspNow >= hardStopTimeMs && completedDepth > 1) break;
+			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 			List<Integer> pv = extractPV(0);
 			previousBest = pv.isEmpty() ? 0 : pv.get(0);
@@ -164,8 +156,6 @@ public final class Search {
 			if (infoHandler != null) {
 				infoHandler.onInfo(depth, selDepth, nodes, nps, hashfull, score, elapsed, pv);
 			}
-
-			completedDepth = depth;
 
 			if (now >= softStopTimeMs) break;
 		}
@@ -393,10 +383,8 @@ public final class Search {
 		if ((nodes & 2047L) == 0L) {
 			long now = System.currentTimeMillis();
 			if (now >= hardStopTimeMs) {
-				if (completedDepth > 1) {
-					stopRequested = true;
-					return true;
-				}
+				stopRequested = true;
+				return true;
 			}
 		}
 		return false;
@@ -413,3 +401,5 @@ public final class Search {
 		return pv;
 	}
 }
+
+
