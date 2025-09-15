@@ -199,7 +199,7 @@ public final class Search {
 		int moveCount = moveGen.generateCaptures(board, moves, 0);
 		moveCount = moveGen.generateQuiets(board, moves, moveCount);
 		int[] scores = moveScores[ply];
-		int ttMoveForNode = ttHit ? (TranspositionTable.TT.readPackedMove(bucket, slot) & 0xFFFF) : 0;
+		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
 		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode);
 
 		if (se.staticEval == SCORE_NONE) {
@@ -261,7 +261,7 @@ public final class Search {
 		int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
 		boolean isPV = (nodeType != NodeType.nonPVNode);
-		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, depth, isPV, isPV || prevWasPV);
+		TranspositionTable.TT.store(pos.zobrist(board), (short) MoveFactory.intToMove(bestMove), storeScore, rawEval, bound, depth, isPV, isPV || prevWasPV);
 
 		return bestScore;
 	}
@@ -319,7 +319,7 @@ public final class Search {
 			moveCount = moveGen.generateCaptures(board, moves, 0);
 		}
 		int[] qScores = moveScores[ply];
-		int ttMoveForQ = ttHit ? (TranspositionTable.TT.readPackedMove(bucket, slot) & 0xFFFF) : 0;
+		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
 		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ);
 
 		boolean movePlayed = false;
@@ -369,7 +369,7 @@ public final class Search {
 		int bestMove = se.pvLength > 0 ? se.pv[0] : 0;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
 		boolean isPV = (nodeType != NodeType.nonPVNode);
-		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, 0, isPV, isPV || prevWasPV);
+		TranspositionTable.TT.store(pos.zobrist(board), (short) MoveFactory.intToMove(bestMove), storeScore, rawEval, bound, 0, isPV, isPV || prevWasPV);
 
 		return bestScore;
 	}

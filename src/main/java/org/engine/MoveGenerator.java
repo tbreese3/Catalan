@@ -591,10 +591,10 @@ public final class MoveGenerator {
   }
 
   private static int emitPromotions(int[] moves, int n, int from, int to) {
-    moves[n++] = MoveFactory.Create(from, to, 1, 3);
-    moves[n++] = MoveFactory.Create(from, to, 1, 2);
-    moves[n++] = MoveFactory.Create(from, to, 1, 1);
-    moves[n++] = MoveFactory.Create(from, to, 1, 0);
+    moves[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_QUEEN);
+    moves[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_ROOK);
+    moves[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_BISHOP);
+    moves[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_KNIGHT);
     return n;
   }
 
@@ -604,9 +604,9 @@ public final class MoveGenerator {
   }
 
   private static int emitUnderPromotions(int[] mv, int n, int from, int to) {
-    mv[n++] = MoveFactory.Create(from, to, 1, 2);
-    mv[n++] = MoveFactory.Create(from, to, 1, 1);
-    mv[n++] = MoveFactory.Create(from, to, 1, 0);
+    mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_ROOK);
+    mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_BISHOP);
+    mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_PROMOTION, MoveFactory.PROMOTION_KNIGHT);
     return n;
   }
 
