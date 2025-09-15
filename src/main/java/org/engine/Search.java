@@ -25,6 +25,8 @@ public final class Search {
 		public List<Integer> pv = new ArrayList<>();
 	}
 
+	private enum NodeType { rootNode, pvNode, nonPVNode }
+
 	@FunctionalInterface
 	public interface InfoHandler {
 		void onInfo(int depth, int seldepth, long nodes, long nps, int hashfull,
@@ -59,6 +61,7 @@ public final class Search {
 	private long hardStopTimeMs;
 	private long nodes;
 	private int selDepth;
+	private int completedDepth;
 	private StackEntry[] stack;
 	private final int[][] moveScores = new int[MAX_PLY + 5][MAX_MOVES];
 	private final int[][] moveBuffers = new int[MAX_PLY + 5][MAX_MOVES];
@@ -74,6 +77,7 @@ public final class Search {
 		startTimeMs = System.currentTimeMillis();
 		nodes = 0L;
 		selDepth = 0;
+		completedDepth = 0;
 		softStopTimeMs = limits.softMs > 0 ? startTimeMs + limits.softMs : Long.MAX_VALUE;
 		hardStopTimeMs = limits.hardMs > 0 ? startTimeMs + limits.hardMs : Long.MAX_VALUE;
 
@@ -92,7 +96,9 @@ public final class Search {
 		int maxDepth = limits.depth > 0 ? limits.depth : 64;
 
 		for (int depth = 1; depth <= maxDepth; depth++) {
-			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
+			long loopNow = System.currentTimeMillis();
+			if (stopRequested) break;
+			if (loopNow >= hardStopTimeMs && completedDepth > 1) break;
 
 			int score;
 
@@ -110,7 +116,7 @@ public final class Search {
 			final int rootDepth = depth;
 
 			if (depth <= 3) {
-				score = negamax(root, depth, 0, -INFTY, INFTY, true);
+				score = negamax(root, depth, 0, -INFTY, INFTY, NodeType.rootNode);
 			} else {
 				int delta = 12;
 				int alpha = Math.max(-INFTY, previousScore - delta);
@@ -119,8 +125,10 @@ public final class Search {
 				int searchDepth = depth;
 
 				while (true) {
-					score = negamax(root, searchDepth, 0, alpha, beta, true);
-					if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
+					score = negamax(root, searchDepth, 0, alpha, beta, NodeType.rootNode);
+					long aspNow = System.currentTimeMillis();
+					if (stopRequested) break;
+					if (aspNow >= hardStopTimeMs && completedDepth > 1) break;
 
 					if (score <= alpha) {
 						beta  = (alpha + beta) / 2;
@@ -137,7 +145,9 @@ public final class Search {
 				}
 			}
 
-			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
+			long afterAspNow = System.currentTimeMillis();
+			if (stopRequested) break;
+			if (afterAspNow >= hardStopTimeMs && completedDepth > 1) break;
 
 			List<Integer> pv = extractPV(0);
 			previousBest = pv.isEmpty() ? 0 : pv.get(0);
@@ -155,15 +165,17 @@ public final class Search {
 				infoHandler.onInfo(depth, selDepth, nodes, nps, hashfull, score, elapsed, pv);
 			}
 
+			completedDepth = depth;
+
 			if (now >= softStopTimeMs) break;
 		}
 
 		return result;
 	}
 
-	private int negamax(long[] board, int depth, int ply, int alpha, int beta, boolean pvNode) {
+	private int negamax(long[] board, int depth, int ply, int alpha, int beta, NodeType nodeType) {
 		StackEntry se = stack[ply];
-		se.pvLength = 0; // ensure child PV isn't copied from stale data on early returns
+		se.pvLength = 0;
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
@@ -177,7 +189,7 @@ public final class Search {
 			int ttDepth = TranspositionTable.TT.readDepth(bucket, slot);
 			int ttBound = TranspositionTable.TT.readBound(bucket, slot);
 			int ttScore = TranspositionTable.scoreFromTT(TranspositionTable.TT.readScore(bucket, slot), ply);
-			if (!pvNode && ttDepth >= depth) {
+			if (nodeType == NodeType.nonPVNode && ttDepth >= depth) {
 				if ((ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta)
 						|| (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha)
 						|| (ttBound == TranspositionTable.BOUND_EXACT)) {
@@ -190,7 +202,7 @@ public final class Search {
 		se.inCheck = inCheck;
 
 		if (depth <= 0) {
-			return quiescence(board, ply, alpha, beta, pvNode);
+			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
 		int[] moves = moveBuffers[ply];
@@ -203,7 +215,8 @@ public final class Search {
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
 			se.staticEval = rawEval;
-			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, pvNode, false);
+			boolean isPV = (nodeType != NodeType.nonPVNode);
+			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, false);
 		}
 
 		boolean movePlayed = false;
@@ -218,13 +231,14 @@ public final class Search {
 			movePlayed = true;
 
 			int score;
-			boolean childPv = pvNode && i == 0;
+			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
+			boolean childPv = parentIsPV && i == 0;
 			if (childPv) {
-				score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, true);
+				score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
 			} else {
-				score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, false);
-				if (pvNode && score > alpha && score < beta) {
-					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, true);
+				score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+				if (parentIsPV && score > alpha && score < beta) {
+					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
 			}
 
@@ -256,14 +270,15 @@ public final class Search {
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
 		int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
-		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, depth, pvNode, pvNode || prevWasPV);
+		boolean isPV = (nodeType != NodeType.nonPVNode);
+		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, depth, isPV, isPV || prevWasPV);
 
 		return bestScore;
 	}
 
-	private int quiescence(long[] board, int ply, int alpha, int beta, boolean pvNode) {
+	private int quiescence(long[] board, int ply, int alpha, int beta, NodeType nodeType) {
 		StackEntry se = stack[ply];
-		se.pvLength = 0; // clear PV immediately to avoid stale tail if we stop early
+		se.pvLength = 0;
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
@@ -276,7 +291,7 @@ public final class Search {
 		if (ttHit) {
 			int ttBound = TranspositionTable.TT.readBound(bucket, slot);
 			int ttScore = TranspositionTable.scoreFromTT(TranspositionTable.TT.readScore(bucket, slot), ply);
-			if (!pvNode) {
+			if (nodeType == NodeType.nonPVNode) {
 				if (ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta) return ttScore;
 				if (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha) return ttScore;
 				if (ttBound == TranspositionTable.BOUND_EXACT) return ttScore;
@@ -294,7 +309,8 @@ public final class Search {
 			if (standPat >= beta) return standPat;
 			if (standPat > alpha) alpha = standPat;
 			boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
-			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, pvNode, pvNode || prevWasPV);
+			boolean isPV = (nodeType != NodeType.nonPVNode);
+			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, isPV || prevWasPV);
 		} else {
 			standPat = -INFTY;
 		}
@@ -326,7 +342,7 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
-			int score = -quiescence(board, ply + 1, -beta, -alpha, pvNode);
+			int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType);
 
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
@@ -362,7 +378,8 @@ public final class Search {
 		int rawEval = (standPat != -INFTY) ? standPat : evaluate(board);
 		int bestMove = se.pvLength > 0 ? se.pv[0] : 0;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
-		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, 0, pvNode, pvNode || prevWasPV);
+		boolean isPV = (nodeType != NodeType.nonPVNode);
+		TranspositionTable.TT.store(pos.zobrist(board), (short) (bestMove & 0xFFFF), storeScore, rawEval, bound, 0, isPV, isPV || prevWasPV);
 
 		return bestScore;
 	}
@@ -376,8 +393,10 @@ public final class Search {
 		if ((nodes & 2047L) == 0L) {
 			long now = System.currentTimeMillis();
 			if (now >= hardStopTimeMs) {
-				stopRequested = true;
-				return true;
+				if (completedDepth > 1) {
+					stopRequested = true;
+					return true;
+				}
 			}
 		}
 		return false;
@@ -394,5 +413,3 @@ public final class Search {
 		return pv;
 	}
 }
-
-
