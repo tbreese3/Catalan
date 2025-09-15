@@ -219,11 +219,14 @@ public class UCI {
                 for (int m : pv) sb.append(' ').append(org.engine.MoveFactory.moveToUci(m));
                 System.out.println(sb.toString());
             });
-            if (res.bestMove != 0) {
-                System.out.println("bestmove " + org.engine.MoveFactory.moveToUci(res.bestMove));
-            } else {
-                System.out.println("bestmove 0000");
+            int best = res.bestMove;
+            
+            if (best == 0) {
+                MoveGenerator mg = new MoveGenerator();
+                best = mg.getFirstLegalMove(board);
             }
+
+            System.out.println("bestmove " + org.engine.MoveFactory.moveToUci(best));
         }, "search-thread");
         searchThread.setDaemon(true);
         searchThread.start();
