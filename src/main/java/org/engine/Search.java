@@ -192,6 +192,7 @@ public final class Search {
 		se.inCheck = inCheck;
 
 		if (depth <= 0) {
+			nodes--;
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
