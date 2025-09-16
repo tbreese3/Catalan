@@ -13,7 +13,7 @@ public final class MoveOrderer {
         if (ttMove == 0) return;
         for (int i = 0; i < size; i++) {
             int m = moves[i];
-            if ((ttMove & 0xFFFF) == (m & 0xFFFF)) {
+            if (MoveFactory.intToMove(ttMove) == MoveFactory.intToMove(m)) {
                 scores[i] = 1;
                 break;
             }
@@ -26,7 +26,7 @@ public final class MoveOrderer {
         if (ttMove == 0) return;
         for (int i = 0; i < size; i++) {
             int m = moves[i];
-            if ((ttMove & 0xFFFF) == (m & 0xFFFF)) {
+            if (MoveFactory.intToMove(ttMove) == MoveFactory.intToMove(m)) {
                 scores[i] = 1;
                 break;
             }
