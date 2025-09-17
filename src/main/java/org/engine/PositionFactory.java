@@ -391,7 +391,7 @@ public final class PositionFactory {
       h ^= EP_FILE[oldEP & 7];
     }
 
-    // Increment halfmove clock
+    // Increment halfmove clock like a normal move
     int oldHC = (metaOld & HC_BITS) >>> HC_SHIFT;
     int newHC = oldHC + 1;
     if (newHC > 0x7F) newHC = 0x7F; // clamp (7 bits)
@@ -700,5 +700,13 @@ public final class PositionFactory {
     if ((bb[BQ] & bit) != 0) return BQ;
     if ((bb[BK] & bit) != 0) return BK;
     return -1;
+  }
+
+  public static boolean hasNonPawnMaterial(long[] bb, boolean white) {
+    if (white) {
+      return (bb[WN] | bb[WB] | bb[WR] | bb[WQ]) != 0L;
+    } else {
+      return (bb[BN] | bb[BB] | bb[BR] | bb[BQ]) != 0L;
+    }
   }
 }

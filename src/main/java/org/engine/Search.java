@@ -214,7 +214,7 @@ public final class Search {
 		if (nodeType == NodeType.nonPVNode && !inCheck && depth >= 3) {
 			if (se.staticEval >= beta) {
 				boolean white = PositionFactory.whiteToMove(board);
-				if (hasNonPawnMaterial(board, white)) {
+				if (PositionFactory.hasNonPawnMaterial(board, white)) {
 					int R = depth > 6 ? 3 : 2;
 					int newDepth = depth - 1 - R;
 					pos.makeNullMoveInPlace(board);
@@ -422,13 +422,6 @@ public final class Search {
 		return pv;
 	}
 
-	private static boolean hasNonPawnMaterial(long[] bb, boolean white) {
-		if (white) {
-			return (bb[PositionFactory.WN] | bb[PositionFactory.WB] | bb[PositionFactory.WR] | bb[PositionFactory.WQ]) != 0L;
-		} else {
-			return (bb[PositionFactory.BN] | bb[PositionFactory.BB] | bb[PositionFactory.BR] | bb[PositionFactory.BQ]) != 0L;
-		}
-	}
 }
 
 
