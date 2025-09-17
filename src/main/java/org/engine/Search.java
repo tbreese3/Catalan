@@ -210,6 +210,26 @@ public final class Search {
 			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, false);
 		}
 
+		// Null-move pruning
+		if (nodeType == NodeType.nonPVNode && !inCheck && depth >= 3) {
+			if (se.staticEval >= beta) {
+				boolean white = PositionFactory.whiteToMove(board);
+				if (hasNonPawnMaterial(board, white)) {
+					int R = depth > 6 ? 3 : 2;
+					int newDepth = depth - 1 - R;
+					pos.makeNullMoveInPlace(board);
+					int nullScore = -negamax(board, Math.max(0, newDepth), ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
+					pos.undoNullMoveInPlace(board);
+					if (nullScore >= beta) {
+						int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
+						boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
+						TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.scoreToTT(nullScore, ply), rawEval, TranspositionTable.BOUND_LOWER, depth, /*isPV=*/false, prevWasPV);
+						return nullScore;
+					}
+				}
+			}
+		}
+
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
@@ -400,6 +420,14 @@ public final class Search {
 			pv.add(m);
 		}
 		return pv;
+	}
+
+	private static boolean hasNonPawnMaterial(long[] bb, boolean white) {
+		if (white) {
+			return (bb[PositionFactory.WN] | bb[PositionFactory.WB] | bb[PositionFactory.WR] | bb[PositionFactory.WQ]) != 0L;
+		} else {
+			return (bb[PositionFactory.BN] | bb[PositionFactory.BB] | bb[PositionFactory.BR] | bb[PositionFactory.BQ]) != 0L;
+		}
 	}
 }
 

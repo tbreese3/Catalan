@@ -372,6 +372,83 @@ public final class PositionFactory {
     if (hsp > 1) bb[HIST_SP] = hsp - 1;
   }
 
+  public boolean makeNullMoveInPlace(long[] bb) {
+    long h = bb[HASH];
+    int metaOld = (int) bb[META];
+    int oldEP = (int) ((metaOld & EP_BITS) >>> EP_SHIFT);
+
+    int sp = (int) bb[COOKIE_SP];
+    bb[COOKIE_BASE + sp] =
+            (bb[DIFF_META] & 0xFFFF_FFFFL) << 32 |
+                    (bb[DIFF_INFO] & 0xFFFF_FFFFL);
+    bb[COOKIE_SP] = sp + 1;
+
+    int meta = metaOld;
+
+    // Clear en-passant
+    if (oldEP != EP_NONE) {
+      meta = (meta & ~EP_BITS) | ((int) EP_NONE << EP_SHIFT);
+      h ^= EP_FILE[oldEP & 7];
+    }
+
+    // Increment halfmove clock
+    int oldHC = (metaOld & HC_BITS) >>> HC_SHIFT;
+    int newHC = oldHC + 1;
+    if (newHC > 0x7F) newHC = 0x7F; // clamp (7 bits)
+    meta = (meta & ~HC_BITS) | (newHC << HC_SHIFT);
+
+    // Toggle side to move
+    meta ^= STM_MASK;
+    h ^= SIDE_TO_MOVE;
+
+    // Store diff/meta
+    bb[DIFF_INFO] = 0;
+    bb[DIFF_META] = (int) (bb[META] ^ meta);
+    bb[META] = meta;
+    bb[HASH] = h;
+
+    // Push zobrist into history
+    int hsp = (int) bb[HIST_SP];
+    if (hsp < HIST_CAP) {
+      bb[HIST_BASE + hsp] = bb[HASH];
+      bb[HIST_SP] = hsp + 1;
+    }
+
+    return true;
+  }
+
+  public void undoNullMoveInPlace(long[] bb) {
+    long h = bb[HASH];
+    int metaAfter = (int) bb[META];
+    int crAfter = (metaAfter & CR_BITS) >>> CR_SHIFT;
+    int epAfter = (metaAfter & EP_BITS) >>> EP_SHIFT;
+
+    bb[META] ^= bb[DIFF_META];
+    int metaBefore = (int) bb[META];
+    int crBefore = (metaBefore & CR_BITS) >>> CR_SHIFT;
+    int epBefore = (metaBefore & EP_BITS) >>> EP_SHIFT;
+
+    // Toggle side to move back
+    h ^= SIDE_TO_MOVE;
+    if (crAfter != crBefore) h ^= CASTLING[crAfter] ^ CASTLING[crBefore];
+    if (epAfter != epBefore) {
+      if (epAfter != EP_NONE)  h ^= EP_FILE[epAfter & 7];
+      if (epBefore != EP_NONE) h ^= EP_FILE[epBefore & 7];
+    }
+
+    int sp = (int) bb[COOKIE_SP] - 1;
+    long ck = bb[COOKIE_BASE + sp];
+    bb[COOKIE_SP] = sp;
+    bb[DIFF_INFO] = (int)  ck;
+    bb[DIFF_META] = (int) (ck >>> 32);
+
+    bb[HASH] = h;
+
+    // Pop history (keep at least the initial entry)
+    int hsp = (int) bb[HIST_SP];
+    if (hsp > 1) bb[HIST_SP] = hsp - 1;
+  }
+
   private static int inferMover(long[] bb, int from) {
     int p = pieceAt(bb, from);
     return p != -1 ? p : (whiteToMove(bb) ? WP : BP);
