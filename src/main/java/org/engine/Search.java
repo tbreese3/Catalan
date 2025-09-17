@@ -211,21 +211,14 @@ public final class Search {
 		}
 
 		// Null-move pruning
-		if (nodeType == NodeType.nonPVNode && !inCheck && depth >= 3) {
-			if (se.staticEval >= beta) {
-				boolean white = PositionFactory.whiteToMove(board);
-				if (PositionFactory.hasNonPawnMaterial(board, white)) {
-					int R = depth > 6 ? 3 : 2;
-					int newDepth = depth - 1 - R;
-					pos.makeNullMoveInPlace(board);
-					int nullScore = -negamax(board, Math.max(0, newDepth), ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
-					pos.undoNullMoveInPlace(board);
-					if (nullScore >= beta) {
-						int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
-						boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
-						TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.scoreToTT(nullScore, ply), rawEval, TranspositionTable.BOUND_LOWER, depth, /*isPV=*/false, prevWasPV);
-						return nullScore;
-					}
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
+			if (pos.hasNonPawnMaterialForSTM(board)) {
+				int R = (depth >= 6) ? 3 : 2;
+				pos.makeNullMoveInPlace(board);
+				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
+				pos.undoNullMoveInPlace(board);
+				if (score >= beta) {
+					return score;
 				}
 			}
 		}
@@ -421,7 +414,6 @@ public final class Search {
 		}
 		return pv;
 	}
-
 }
 
 
