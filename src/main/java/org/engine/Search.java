@@ -210,6 +210,19 @@ public final class Search {
 			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, false);
 		}
 
+		// Null-move pruning
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
+			if (pos.hasNonPawnMaterialForSTM(board)) {
+				int R = (depth >= 6) ? 3 : 2;
+				pos.makeNullMoveInPlace(board);
+				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
+				pos.undoNullMoveInPlace(board);
+				if (score >= beta) {
+					return score;
+				}
+			}
+		}
+
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
