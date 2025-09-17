@@ -91,15 +91,37 @@ tasks.register('writeLauncher') {
         def f = bundleDir.get().file("run.cmd").asFile
         f.parentFile.mkdirs()
         f.text = """@echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 set "HERE=%~dp0"
 set "JAVA=%HERE%jre\\bin\\java.exe"
-if not exist "%JAVA%" (
-  echo ERROR: Bundled JRE not found: "%JAVA%"
-  exit /b 1
+
+set "REMAIN=30"
+set "EXITCODE=1"
+
+:retry
+if exist "%JAVA%" (
+  "%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
+  set "EXITCODE=!ERRORLEVEL!"
+) else (
+  set "EXITCODE=9009"
 )
-"%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
-endlocal
+
+if !EXITCODE! EQU 0 goto :success
+if !REMAIN! LEQ 0 goto :fail
+
+echo Launcher failed (code !EXITCODE!). Retrying in 1s... !REMAIN!s left
+timeout /t 1 /nobreak >nul
+set /a REMAIN-=1
+goto :retry
+
+:success
+set "RC=0"
+endlocal & exit /b %RC%
+
+:fail
+if not exist "%JAVA%" echo ERROR: Bundled JRE not found: "%JAVA%"
+set "RC=!EXITCODE!"
+endlocal & exit /b %RC%
 """
     }
 }
