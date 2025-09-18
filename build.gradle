@@ -90,6 +90,17 @@ graalvmNative {
                 '--march=x86-64-v3',
                 "-H:Class=${mainClassName}"
             ])
+            // Conditional PGO flags driven by Gradle properties
+            if (project.hasProperty('pgoInstrument')) {
+                buildArgs.addAll([
+                    '--pgo-instrument',
+                    '-H:-SamplingCollect' // Windows workaround for GR-64666
+                ])
+            }
+            if (project.hasProperty('pgoUse')) {
+                def prof = project.findProperty('pgoProfile') ?: 'default.iprof'
+                buildArgs.add("--pgo=${prof}")
+            }
             resources.autodetect()
         }
     }

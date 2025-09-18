@@ -24,6 +24,26 @@ public class UCI {
         new UCI().loop();
     }
 
+    /**
+     * Run a representative workload for PGO instrumentation: start position and a single
+     * timed search with the given movetime. Blocks until the search finishes.
+     */
+    public static void runPgoMovetime(int movetimeMs) throws Exception {
+        if (movetimeMs <= 0) movetimeMs = 15000;
+        Eval.initializeEval();
+        TranspositionTable.TT.init(256);
+        UCI u = new UCI();
+        u.handlePosition("position startpos");
+        u.handleGo("go movetime " + movetimeMs);
+        // Wait for the search thread to finish before exiting so that the iprof can be written
+        Thread t = u.searchThread;
+        if (t != null) {
+            try {
+                t.join();
+            } catch (InterruptedException ignored) {}
+        }
+    }
+
     private void loop() throws IOException {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
         String line;
