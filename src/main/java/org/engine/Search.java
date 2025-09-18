@@ -196,13 +196,6 @@ public final class Search {
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
-		int[] moves = moveBuffers[ply];
-		int moveCount = moveGen.generateCaptures(board, moves, 0);
-		moveCount = moveGen.generateQuiets(board, moves, moveCount);
-		int[] scores = moveScores[ply];
-		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode);
-
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
 			se.staticEval = rawEval;
@@ -223,12 +216,17 @@ public final class Search {
 			}
 		}
 
+		int[] moves = moveBuffers[ply];
+		int[] scores = moveScores[ply];
+		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
+		MovePicker picker = new MovePicker(board, moveGen, inCheck, false, ttMoveForNode, moves, scores);
+
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
-		for (int i = 0; i < moveCount; i++) {
+
+		for (int move, i = 0; (move = picker.next()) != 0; i++) {
 			if (stopCheck()) break;
-			int move = MoveOrderer.GetNextMove(moves, scores, moveCount, i);
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -325,22 +323,14 @@ public final class Search {
 		if (alpha >= beta) return alpha;
 
 		int[] moves = moveBuffers[ply];
-		int moveCount;
-		if (inCheck) {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
-			moveCount = moveGen.generateQuiets(board, moves, moveCount);
-		} else {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
-		}
 		int[] qScores = moveScores[ply];
 		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ);
+		MovePicker qPicker = new MovePicker(board, moveGen, inCheck, true, ttMoveForQ, moves, qScores);
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
-		for (int i = 0; i < moveCount; i++) {
+		for (int move; (move = qPicker.next()) != 0;) {
 			if (stopCheck()) break;
-			int move = MoveOrderer.GetNextMove(moves, qScores, moveCount, i);
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
