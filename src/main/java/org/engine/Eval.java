@@ -295,10 +295,8 @@ public final class Eval {
     boolean whiteToMove = PositionFactory.whiteToMove(bb);
     int outputBucket = chooseOutputBucket(bb);
 
-    short[] stmAccumulator = whiteToMove ? nnueState.whiteAccumulator[nnueState.currentAccumulator]
-                                         : nnueState.blackAccumulator[nnueState.currentAccumulator];
-    short[] oppAccumulator = whiteToMove ? nnueState.blackAccumulator[nnueState.currentAccumulator]
-                                         : nnueState.whiteAccumulator[nnueState.currentAccumulator];
+    short[] stmAccumulator = whiteToMove ? nnueState.whiteAccumulator[nnueState.currentAccumulator] : nnueState.blackAccumulator[nnueState.currentAccumulator];
+    short[] oppAccumulator = whiteToMove ? nnueState.blackAccumulator[nnueState.currentAccumulator] : nnueState.whiteAccumulator[nnueState.currentAccumulator];
 
     short[] stmWeights = L2_WEIGHTS[outputBucket][0];
     short[] oppWeights = L2_WEIGHTS[outputBucket][1];
@@ -306,6 +304,8 @@ public final class Eval {
     long output = 0;
     for (int i = 0; i < HL_SIZE; i++) {
       output += (long) screluPreCalc[stmAccumulator[i] - (int) Short.MIN_VALUE] * stmWeights[i];
+    }
+    for (int i = 0; i < HL_SIZE; i++) {
       output += (long) screluPreCalc[oppAccumulator[i] - (int) Short.MIN_VALUE] * oppWeights[i];
     }
 
