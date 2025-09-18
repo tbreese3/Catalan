@@ -3,7 +3,6 @@ plugins {
     id 'application'
     id 'com.gradleup.shadow' version '9.0.2'
     id 'de.undercouch.download' version '5.6.0'
-    id 'org.graalvm.buildtools.native' version '0.10.4'
 }
 
 group = 'org.example'
@@ -19,10 +18,16 @@ dependencies {
 
 test { useJUnitPlatform() }
 
-/** App settings */
+/** App + packaging settings */
 ext {
     appName       = 'Catalan'
     mainClassName = 'org.engine.Main'
+    jreMajor      = '24'
+
+    jreWinZipUrl  = "https://api.adoptium.net/v3/binary/latest/${jreMajor}/ga/windows/x64/jre/hotspot/normal/eclipse"
+
+    warpVersion   = '0.3.0'
+    warpExeUrl    = "https://github.com/dgiagio/warp/releases/download/v${warpVersion}/windows-x64.warp-packer.exe"
 }
 
 application {
@@ -48,101 +53,86 @@ tasks.named('shadowJar') {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest { attributes 'Main-Class': mainClassName }
 }
-// Ensure the regular JAR also contains the Main-Class manifest
-tasks.named('jar') {
-    manifest { attributes 'Main-Class': mainClassName }
-}
 
 def buildDirPath  = layout.buildDirectory
+def toolsDir      = buildDirPath.dir("tools")
+def distDir       = buildDirPath.dir("dist")
+def bundleDir     = buildDirPath.dir("bundle")
+def jreZipFile    = toolsDir.map { it.file("temurin-jre.zip") }
+def jreDir        = buildDirPath.dir("jre-win-x64")
+def warpPackerExe = toolsDir.map { it.file("warp-packer.exe") }
 
-/** GraalVM download settings (JDK 24.0.2 for Windows x64) */
-ext {
-    graalVersion   = '24.0.2'
-    graalZipUrl    = "https://download.oracle.com/graalvm/24/archive/graalvm-jdk-${graalVersion}_windows-x64_bin.zip"
+/** Download Temurin JRE (Windows x64) */
+tasks.register('downloadJre', de.undercouch.gradle.tasks.download.Download) {
+    src jreWinZipUrl; dest jreZipFile.get().asFile; overwrite false
 }
 
-def graalDir      = layout.buildDirectory.dir("graalvm")
-def graalZipFile  = graalDir.map { it.file("graalvm.zip") }
-
-tasks.register('downloadGraal', de.undercouch.gradle.tasks.download.Download) {
-    src graalZipUrl; dest graalZipFile.get().asFile; overwrite false
-}
-
-tasks.register('unzipGraal', Copy) {
-    dependsOn 'downloadGraal'
-    from { zipTree(graalZipFile.get().asFile) }
-    into graalDir
-}
-
-// Ensure GraalVM plugin uses full settings
-graalvmNative {
-    toolchainDetection = true
-    binaries {
-        main {
-            imageName.set(appName)
-            mainClass.set(mainClassName)
-            jvmArgs.addAll(['--add-modules=jdk.incubator.vector'])
-            buildArgs.addAll([
-                '--no-fallback',
-                '--enable-url-protocols=http,https',
-                '--report-unsupported-elements-at-runtime',
-                '-H:+VectorAPISupport',
-                '--march=x86-64-v3',
-                "-H:Class=${mainClassName}"
-            ])
-            // Conditional PGO flags driven by Gradle properties
-            if (project.hasProperty('pgoInstrument')) {
-                buildArgs.addAll([
-                    '--pgo-instrument',
-                    '-H:-SamplingCollect' // Windows workaround for GR-64666
-                ])
-            }
-            if (project.hasProperty('pgoUse')) {
-                def prof = project.findProperty('pgoProfile') ?: 'default.iprof'
-                buildArgs.add("--pgo=${prof}")
-            }
-            resources.autodetect()
-        }
-    }
-}
-
-// If GraalVM was downloaded locally, point the GraalVM plugin launcher to it
-providers.provider {
-    def root = graalDir.get().asFile.listFiles()?.find { it.isDirectory() && it.name.toLowerCase().startsWith('graalvm-jdk-') }
-    if (root != null) {
-        graalvmNative {
-            binaries {
-                main {
-                    javaLauncher.set(javaToolchains.launcherFor {
-                        languageVersion = JavaLanguageVersion.of(24)
-                    })
-                    // Let Native Build Tools find native-image inside the selected launcher
-                }
-            }
-        }
-    }
-}
-
-/** Convenience native meta-task */
-tasks.register('packageNative') {
-    group = 'distribution'
-    description = 'Build the GraalVM native Windows EXE.'
-    dependsOn tasks.named('nativeCompile')
-}
-
-/** Configure Gradle to see the downloaded GraalVM for this build */
-tasks.register('prepareGraalToolchain') {
-    dependsOn 'unzipGraal'
+/** Unzip JRE into build/jre-win-x64/jre (so we have jre/bin/java.exe) */
+tasks.register('unzipJre', Copy) {
+    dependsOn 'downloadJre'
+    from { zipTree(jreZipFile.get().asFile) }
+    into jreDir
     doLast {
-        def root = graalDir.get().asFile.listFiles().find { it.isDirectory() && it.name.toLowerCase().startsWith('graalvm-jdk-') }
-        if (root) {
-            println "Using GraalVM at: ${root.absolutePath}"
-            System.setProperty('org.gradle.java.installations.paths', root.absolutePath)
-        } else {
-            println 'No downloaded GraalVM found; relying on auto-detection.'
+        def root = jreDir.get().asFile.listFiles().find { it.isDirectory() }
+        if (root && root.name != 'jre') {
+            copy { from root; into new File(jreDir.get().asFile, 'jre') }
+            delete root
+        }
+        if (!new File(jreDir.get().asFile, 'jre/bin/java.exe').exists()) {
+            throw new GradleException("Bundled JRE not found at ${jreDir.get().asFile}/jre/bin/java.exe")
         }
     }
 }
 
-// Make nativeCompile depend on prepared toolchain so devs can just run it
-tasks.named('nativeCompile') { dependsOn 'prepareGraalToolchain' }
+/** Minimal Windows launcher used by Warp (calls bundled JRE) */
+tasks.register('writeLauncher') {
+    outputs.file(bundleDir.map { it.file("run.cmd") })
+    doLast {
+        def f = bundleDir.get().file("run.cmd").asFile
+        f.parentFile.mkdirs()
+        f.text = """@echo off
+setlocal
+set "HERE=%~dp0"
+set "JAVA=%HERE%jre\\bin\\java.exe"
+if not exist "%JAVA%" (
+  echo ERROR: Bundled JRE not found: "%JAVA%"
+  exit /b 1
+)
+"%JAVA%" --add-modules jdk.incubator.vector -jar "%HERE%app.jar" %*
+endlocal
+"""
+    }
+}
+
+/** Lay out bundle directory: app.jar + jre + run.cmd */
+tasks.register('bundleApp', Copy) {
+    dependsOn 'shadowJar', 'unzipJre', 'writeLauncher'
+    from(tasks.named('shadowJar')) { rename { 'app.jar' } }
+    from({ new File(jreDir.get().asFile, 'jre') }) { into 'jre' }
+    into bundleDir
+}
+
+/** Download warp-packer.exe */
+tasks.register('downloadWarp', de.undercouch.gradle.tasks.download.Download) {
+    src warpExeUrl; dest warpPackerExe.get().asFile; overwrite false
+}
+
+/** Build single-file EXE */
+tasks.register('warpPack', Exec) {
+    dependsOn 'bundleApp', 'downloadWarp'
+    inputs.dir bundleDir
+    outputs.file distDir.map { it.file("${appName}.exe") }
+    doFirst { distDir.get().asFile.mkdirs() }
+    commandLine warpPackerExe.get().asFile.absolutePath,
+            '--arch', 'windows-x64',
+            '--input_dir', bundleDir.get().asFile.absolutePath,
+            '--exec', 'run.cmd',
+            '--output', distDir.get().file("${appName}.exe").asFile.absolutePath
+}
+
+/** Convenience meta-task */
+tasks.register('packageExe') {
+    group = 'distribution'
+    description = 'Build the single-file Windows EXE with a bundled JRE.'
+    dependsOn 'warpPack'
+}
