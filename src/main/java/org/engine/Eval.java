@@ -292,30 +292,24 @@ public final class Eval {
   }
 
   public static int evaluate(NNUEState nnueState, long[] bb) {
+    int i;
     boolean whiteToMove = PositionFactory.whiteToMove(bb);
-    int outputBucket = chooseOutputBucket(bb);
-
+    int outputBucket = Eval.chooseOutputBucket(bb);
     short[] stmAccumulator = whiteToMove ? nnueState.whiteAccumulator[nnueState.currentAccumulator] : nnueState.blackAccumulator[nnueState.currentAccumulator];
     short[] oppAccumulator = whiteToMove ? nnueState.blackAccumulator[nnueState.currentAccumulator] : nnueState.whiteAccumulator[nnueState.currentAccumulator];
-
     short[] stmWeights = L2_WEIGHTS[outputBucket][0];
     short[] oppWeights = L2_WEIGHTS[outputBucket][1];
-
-    long output = 0;
-    for (int i = 0; i < HL_SIZE; i++) {
-      output += (long) screluPreCalc[stmAccumulator[i] - (int) Short.MIN_VALUE] * stmWeights[i];
+    int output = 0;
+    for (i = 0; i < 2048; ++i) {
+      output += screluPreCalc[stmAccumulator[i] - Short.MIN_VALUE] * stmWeights[i];
     }
-    for (int i = 0; i < HL_SIZE; i++) {
-      output += (long) screluPreCalc[oppAccumulator[i] - (int) Short.MIN_VALUE] * oppWeights[i];
+    for (i = 0; i < 2048; ++i) {
+      output += screluPreCalc[oppAccumulator[i] - Short.MIN_VALUE] * oppWeights[i];
     }
-
-    output /= QA;
+    output /= 255;
     output += L2_BIASES[outputBucket];
-
-    output *= FV_SCALE;
-    output /= QAB;
-
-    return (int) output;
+    output *= 400;
+    return output /= 16320;
   }
 
   private static int getIndexWhite(int square, int piece) {
