@@ -275,9 +275,7 @@ public final class Search {
 					int targetPiece = PositionFactory.pieceAt(board, to);
 					isCapture = targetPiece != -1;
 				}
-				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
-				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
-				if (!isCapture && !isPromotion && !isCastle) {
+				if (!isCapture) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
 				}

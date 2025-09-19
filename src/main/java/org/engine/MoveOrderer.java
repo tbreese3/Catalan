@@ -39,10 +39,11 @@ public final class MoveOrderer {
             boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
             boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
 
-            if (isCapture || isPromotion) {
-                scores[i] = 1_000_000;
-            } else if (!isCastle) {
-                scores[i] = (m == k && k != 0) ? 500_000 : 0;
+            if (m == k && k != 0) {
+                // Killer directly after TT
+                scores[i] = 900_000;
+            } else if (isCapture || isPromotion) {
+                scores[i] = 800_000;
             } else {
                 scores[i] = 0;
             }
