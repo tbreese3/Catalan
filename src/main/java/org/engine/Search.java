@@ -64,6 +64,7 @@ public final class Search {
 	private StackEntry[] stack;
 	private final int[][] moveScores = new int[MAX_PLY + 5][MAX_MOVES];
 	private final int[][] moveBuffers = new int[MAX_PLY + 5][MAX_MOVES];
+	private final int[][] killers = new int[MAX_PLY + 5][2];
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
@@ -108,6 +109,7 @@ public final class Search {
 				e.staticEval = SCORE_NONE;
 				e.reduction = 0;
 			}
+			for (int i = 0; i < killers.length; i++) { killers[i][0] = 0; killers[i][1] = 0; }
 
 			final int rootDepth = depth;
 
@@ -201,7 +203,9 @@ public final class Search {
 		moveCount = moveGen.generateQuiets(board, moves, moveCount);
 		int[] scores = moveScores[ply];
 		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode);
+		int k1 = killers[ply][0];
+		int k2 = killers[ply][1];
+		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, k1, k2, board);
 
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
@@ -260,7 +264,30 @@ public final class Search {
 				}
 			}
 
-			if (alpha >= beta) break;
+			if (alpha >= beta) {
+				int flags = MoveFactory.GetFlags(move);
+				boolean isCapture;
+				if (flags == MoveFactory.FLAG_EN_PASSANT) {
+					isCapture = true;
+				} else {
+					int to = MoveFactory.GetTo(move);
+					int targetPiece = PositionFactory.pieceAt(board, to);
+					isCapture = targetPiece != -1;
+				}
+				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
+				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
+
+				if (!isCapture && !isPromotion && !isCastle) {
+					int m = MoveFactory.intToMove(move);
+					if (m != 0) {
+						if (killers[ply][0] != m) {
+							killers[ply][1] = killers[ply][0];
+							killers[ply][0] = m;
+						}
+					}
+				}
+				break;
+			}
 		}
 
 		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
