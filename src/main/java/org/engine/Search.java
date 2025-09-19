@@ -200,14 +200,6 @@ public final class Search {
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = 0;
 
-		int[] moves = moveBuffers[ply];
-		int moveCount = moveGen.generateCaptures(board, moves, 0);
-		moveCount = moveGen.generateQuiets(board, moves, moveCount);
-		int[] scores = moveScores[ply];
-		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		int killer = stack[ply].searchKiller;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, killer, board);
-
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
 			se.staticEval = rawEval;
@@ -227,6 +219,14 @@ public final class Search {
 				}
 			}
 		}
+
+		int[] moves = moveBuffers[ply];
+		int moveCount = moveGen.generateCaptures(board, moves, 0);
+		moveCount = moveGen.generateQuiets(board, moves, moveCount);
+		int[] scores = moveScores[ply];
+		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
+		int killer = stack[ply].searchKiller;
+		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, killer, board);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
