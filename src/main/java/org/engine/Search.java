@@ -47,9 +47,9 @@ public final class Search {
 			this.pv = new int[MAX_PLY];
 			this.pvLength = 0;
 			this.inCheck = false;
-			this.move = 0;
-			this.excludedMove = 0;
-			this.searchKiller = 0;
+			this.move = MoveFactory.MOVE_NONE;
+			this.excludedMove = MoveFactory.MOVE_NONE;
+			this.searchKiller = MoveFactory.MOVE_NONE;
 			this.staticEval = SCORE_NONE;
 			this.reduction = 0;
 		}
@@ -89,7 +89,7 @@ public final class Search {
 
 		Result result = new Result();
 
-		int previousBest = 0;
+		int previousBest = MoveFactory.MOVE_NONE;
 		int previousScore = 0;
 		int maxDepth = limits.depth > 0 ? limits.depth : 64;
 
@@ -102,9 +102,9 @@ public final class Search {
 				StackEntry e = stack[i];
 				e.pvLength = 0;
 				e.inCheck = false;
-				e.move = 0;
-				e.excludedMove = 0;
-				e.searchKiller = 0;
+				e.move = MoveFactory.MOVE_NONE;
+				e.excludedMove = MoveFactory.MOVE_NONE;
+				e.searchKiller = MoveFactory.MOVE_NONE;
 				e.staticEval = SCORE_NONE;
 				e.reduction = 0;
 			}
@@ -143,7 +143,7 @@ public final class Search {
 			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 			List<Integer> pv = extractPV(0);
-			previousBest = pv.isEmpty() ? 0 : pv.get(0);
+			previousBest = pv.isEmpty() ? MoveFactory.MOVE_NONE : pv.get(0);
 			previousScore = score;
 
 			result.bestMove = previousBest;
@@ -198,15 +198,7 @@ public final class Search {
 		}
 
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
-		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = 0;
-
-		int[] moves = moveBuffers[ply];
-		int moveCount = moveGen.generateCaptures(board, moves, 0);
-		moveCount = moveGen.generateQuiets(board, moves, moveCount);
-		int[] scores = moveScores[ply];
-		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		int killer = stack[ply].searchKiller;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, killer, board);
+		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
@@ -228,12 +220,17 @@ public final class Search {
 			}
 		}
 
+		int[] moves = moveBuffers[ply];
+        int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
+		int killer = stack[ply].searchKiller;
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForNode, killer, /*includeQuiets=*/true);
+
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
-		for (int i = 0; i < moveCount; i++) {
+		int i = 0;
+		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
-			int move = MoveOrderer.GetNextMove(moves, scores, moveCount, i);
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -292,7 +289,7 @@ public final class Search {
 		else if (bestScore >= beta) bound = TranspositionTable.BOUND_LOWER;
 		else bound = TranspositionTable.BOUND_EXACT;
 
-		int bestMove = se.pvLength > 0 ? se.pv[0] : 0;
+		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
 		int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
@@ -347,22 +344,13 @@ public final class Search {
 		if (alpha >= beta) return alpha;
 
 		int[] moves = moveBuffers[ply];
-		int moveCount;
-		if (inCheck) {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
-			moveCount = moveGen.generateQuiets(board, moves, moveCount);
-		} else {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
-		}
-		int[] qScores = moveScores[ply];
-		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ);
+		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
-		for (int i = 0; i < moveCount; i++) {
+		for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
-			int move = MoveOrderer.GetNextMove(moves, qScores, moveCount, i);
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -402,7 +390,7 @@ public final class Search {
 
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
 		int rawEval = (standPat != -INFTY) ? standPat : evaluate(board);
-		int bestMove = se.pvLength > 0 ? se.pv[0] : 0;
+		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
 		boolean isPV = (nodeType != NodeType.nonPVNode);
 		TranspositionTable.TT.store(pos.zobrist(board), (short) MoveFactory.intToMove(bestMove), storeScore, rawEval, bound, 0, isPV, isPV || prevWasPV);
@@ -431,7 +419,7 @@ public final class Search {
 		List<Integer> pv = new ArrayList<>(se.pvLength);
 		for (int i = 0; i < se.pvLength; i++) {
 			int m = se.pv[i];
-			if (m == 0) break;
+			if (MoveFactory.isNone(m)) break;
 			pv.add(m);
 		}
 		return pv;

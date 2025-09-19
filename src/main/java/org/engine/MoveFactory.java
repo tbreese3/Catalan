@@ -2,6 +2,7 @@ package org.engine;
 
 public final class MoveFactory {
 
+  public static final int MOVE_NONE      = 0;
   public static final int FLAG_NORMAL      = 0;
   public static final int FLAG_PROMOTION   = 1;
   public static final int FLAG_EN_PASSANT  = 2;
@@ -40,6 +41,10 @@ public final class MoveFactory {
 
   public static int intToMove(int raw) {
     return raw & 0xFFFF;
+  }
+
+  public static boolean isNone(int mv) {
+    return (mv & 0xFFFF) == 0;
   }
 
   public static String moveToUci(int mv) {
