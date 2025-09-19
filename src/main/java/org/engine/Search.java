@@ -109,6 +109,7 @@ public final class Search {
 				e.reduction = 0;
 			}
 
+
 			final int rootDepth = depth;
 
 			if (depth <= 3) {
@@ -196,12 +197,16 @@ public final class Search {
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
+		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
+		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = 0;
+
 		int[] moves = moveBuffers[ply];
 		int moveCount = moveGen.generateCaptures(board, moves, 0);
 		moveCount = moveGen.generateQuiets(board, moves, moveCount);
 		int[] scores = moveScores[ply];
 		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode);
+		int killer = stack[ply].searchKiller;
+		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, killer, board);
 
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
@@ -260,7 +265,24 @@ public final class Search {
 				}
 			}
 
-			if (alpha >= beta) break;
+			if (alpha >= beta) {
+				int flags = MoveFactory.GetFlags(move);
+				boolean isCapture;
+				if (flags == MoveFactory.FLAG_EN_PASSANT) {
+					isCapture = true;
+				} else {
+					int to = MoveFactory.GetTo(move);
+					int targetPiece = PositionFactory.pieceAt(board, to);
+					isCapture = targetPiece != -1;
+				}
+				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
+				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
+				if (!isCapture && !isPromotion && !isCastle) {
+					int m = MoveFactory.intToMove(move);
+					if (m != 0) stack[ply].searchKiller = m;
+				}
+				break;
+			}
 		}
 
 		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
