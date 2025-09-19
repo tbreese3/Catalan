@@ -197,11 +197,18 @@ public final class Search {
 		}
 
 		int[] moves = moveBuffers[ply];
-		int moveCount = moveGen.generateCaptures(board, moves, 0);
-		moveCount = moveGen.generateQuiets(board, moves, moveCount);
+		int moveCount;
+		int captureCount = 0;
+		if (inCheck) {
+			moveCount = moveGen.generateEvasions(board, moves, 0);
+			captureCount = 0; // score will detect captures via board/EP
+		} else {
+			captureCount = moveGen.generateCaptures(board, moves, 0);
+			moveCount = moveGen.generateQuiets(board, moves, captureCount);
+		}
 		int[] scores = moveScores[ply];
 		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode);
+		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, captureCount, board);
 
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
@@ -326,15 +333,17 @@ public final class Search {
 
 		int[] moves = moveBuffers[ply];
 		int moveCount;
+		int captureCount = 0;
 		if (inCheck) {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
-			moveCount = moveGen.generateQuiets(board, moves, moveCount);
+			moveCount = moveGen.generateEvasions(board, moves, 0);
+			captureCount = 0; // evasions include both captures and blocks; we will detect captures from board
 		} else {
-			moveCount = moveGen.generateCaptures(board, moves, 0);
+			captureCount = moveGen.generateCaptures(board, moves, 0);
+			moveCount = captureCount;
 		}
 		int[] qScores = moveScores[ply];
 		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ);
+		MoveOrderer.AssignQSearchScores(moves, qScores, moveCount, ttMoveForQ, captureCount, board);
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
