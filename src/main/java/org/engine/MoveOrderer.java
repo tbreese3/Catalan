@@ -7,13 +7,12 @@ public final class MoveOrderer {
 
     private MoveOrderer() {}
 
-    public static void AssignNegaMaxScores(int[] moves, int[] scores, int size, int ttMove, int killer1, int killer2, long[] board) {
+    public static void AssignNegaMaxScores(int[] moves, int[] scores, int size, int ttMove, int killer, long[] board) {
         if (moves == null || scores == null) return;
         for (int i = 0; i < size; i++) scores[i] = 0;
 
         final int tt = MoveFactory.intToMove(ttMove);
-        final int k1 = MoveFactory.intToMove(killer1);
-        final int k2 = MoveFactory.intToMove(killer2);
+        final int k = MoveFactory.intToMove(killer);
 
         // Ensure captures/promotions are searched before killers; TT move first.
         for (int i = 0; i < size; i++) {
@@ -43,13 +42,7 @@ public final class MoveOrderer {
             if (isCapture || isPromotion) {
                 scores[i] = 1_000_000;
             } else if (!isCastle) {
-                if (m == k1 && k1 != 0) {
-                    scores[i] = 500_000;
-                } else if (m == k2 && k2 != 0) {
-                    scores[i] = 499_000;
-                } else {
-                    scores[i] = 0;
-                }
+                scores[i] = (m == k && k != 0) ? 500_000 : 0;
             } else {
                 scores[i] = 0;
             }

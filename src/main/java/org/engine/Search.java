@@ -64,7 +64,6 @@ public final class Search {
 	private StackEntry[] stack;
 	private final int[][] moveScores = new int[MAX_PLY + 5][MAX_MOVES];
 	private final int[][] moveBuffers = new int[MAX_PLY + 5][MAX_MOVES];
-	private final int[][] killers = new int[MAX_PLY + 5][2];
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
@@ -109,7 +108,7 @@ public final class Search {
 				e.staticEval = SCORE_NONE;
 				e.reduction = 0;
 			}
-			for (int i = 0; i < killers.length; i++) { killers[i][0] = 0; killers[i][1] = 0; }
+
 
 			final int rootDepth = depth;
 
@@ -198,14 +197,16 @@ public final class Search {
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
+		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
+		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = 0;
+
 		int[] moves = moveBuffers[ply];
 		int moveCount = moveGen.generateCaptures(board, moves, 0);
 		moveCount = moveGen.generateQuiets(board, moves, moveCount);
 		int[] scores = moveScores[ply];
 		int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : 0;
-		int k1 = killers[ply][0];
-		int k2 = killers[ply][1];
-		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, k1, k2, board);
+		int killer = stack[ply].searchKiller;
+		MoveOrderer.AssignNegaMaxScores(moves, scores, moveCount, ttMoveForNode, killer, board);
 
 		if (se.staticEval == SCORE_NONE) {
 			int rawEval = evaluate(board);
@@ -276,15 +277,9 @@ public final class Search {
 				}
 				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
 				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
-
 				if (!isCapture && !isPromotion && !isCastle) {
 					int m = MoveFactory.intToMove(move);
-					if (m != 0) {
-						if (killers[ply][0] != m) {
-							killers[ply][1] = killers[ply][0];
-							killers[ply][0] = m;
-						}
-					}
+					if (m != 0) stack[ply].searchKiller = m;
 				}
 				break;
 			}
