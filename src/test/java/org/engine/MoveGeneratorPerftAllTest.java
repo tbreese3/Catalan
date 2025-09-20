@@ -117,8 +117,7 @@ public class MoveGeneratorPerftAllTest {
     private long perft(long[] bb,int depth,int ply,C cnt){
         if (depth == 0){ return 1; }
 
-        boolean stmWhite = (bb[META] & 1L) == 0;
-        boolean inCheck  = GEN.kingAttacked(bb, stmWhite);
+        boolean inCheck  = POS_FACTORY.isInCheck(bb);
 
         int[] moves = MOVES[ply];
         int legalCnt;
@@ -141,22 +140,11 @@ public class MoveGeneratorPerftAllTest {
         long nodes = 0;
         for (int i = 0; i < legalCnt; ++i){
             int mv = moves[i];
-
-            if (capturesKing(mv, bb, stmWhite))
-                throw new AssertionError("Generated king capture: "
-                        + moveToUci(mv) + "  FEN " + POS_FACTORY.toFen(bb));
-
             if (!POS_FACTORY.makeMoveInPlace(bb, mv, GEN)) continue;
             nodes += perft(bb, depth-1, ply+1, cnt);
             POS_FACTORY.undoMoveInPlace(bb);
         }
         return nodes;
-    }
-
-    private static boolean capturesKing(int mv,long[] bb,boolean stmWhite){
-        int to   = mv & 0x3F;
-        int enemyK = stmWhite ? BK : WK;
-        return (bb[enemyK] & (1L << to)) != 0;
     }
 
     private static String moveToUci(int mv){

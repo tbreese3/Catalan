@@ -62,7 +62,7 @@ final class MovePicker {
 					while (index < count) {
 						int m = buffer[index++];
 						m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+						if (m == ttMove) continue;
 						return m;
 					}
 					stage = Stage.DONE;
