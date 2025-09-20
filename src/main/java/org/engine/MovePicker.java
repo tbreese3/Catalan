@@ -8,8 +8,9 @@ final class MovePicker {
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
+	private final boolean inCheck;
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+	    private enum Stage { TT, KILLER, EVASIONS, CAPTURES, QUIETS, DONE }
     private Stage stage;
 	private int index;
 	private int count;
@@ -24,6 +25,7 @@ final class MovePicker {
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
 		this.includeQuiets = includeQuiets;
+		this.inCheck = pos.isInCheck(board);
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
@@ -45,11 +47,25 @@ final class MovePicker {
         for (;;) {
             switch (stage) {
                 case TT: {
-                    stage = Stage.KILLER;
+					stage = inCheck ? Stage.EVASIONS : Stage.KILLER;
                     if (!ttTried && !MoveFactory.isNone(ttMove)) {
 						ttTried = true;
 						if (pos.isPseudoLegalMove(board, ttMove, gen)) return ttMove;
 					}
+					break;
+				}
+				case EVASIONS: {
+					if (count == 0) {
+						index = 0;
+						count = gen.generateEvasions(board, buffer, 0);
+					}
+					while (index < count) {
+						int m = buffer[index++];
+						m = MoveFactory.intToMove(m);
+						if (m == ttMove || m == killerMove) continue;
+						return m;
+					}
+					stage = Stage.DONE;
 					break;
 				}
                 case KILLER: {
