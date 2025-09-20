@@ -223,7 +223,7 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
         int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForNode, killer, /*includeQuiets=*/true);
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForNode, killer, true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -345,7 +345,7 @@ public final class Search {
 
 		int[] moves = moveBuffers[ply];
 		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
-		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForQ, MoveFactory.MOVE_NONE, false);
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
