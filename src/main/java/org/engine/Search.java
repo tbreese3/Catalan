@@ -194,7 +194,7 @@ public final class Search {
 
 		if (depth <= 0) {
 			nodes--;
-			return quiescence(board, ply, alpha, beta, nodeType);
+			return quiescence(board, ply, alpha, beta, nodeType, 0);
 		}
 
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
@@ -223,7 +223,7 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
         int ttMoveForNode = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForNode, killer, /*includeQuiets=*/true);
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForNode, killer, false, false, inCheck);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -299,7 +299,7 @@ public final class Search {
 		return bestScore;
 	}
 
-	private int quiescence(long[] board, int ply, int alpha, int beta, NodeType nodeType) {
+	private int quiescence(long[] board, int ply, int alpha, int beta, NodeType nodeType, int qDepth) {
 		StackEntry se = stack[ply];
 		se.pvLength = 0;
 		if (stopCheck()) return 0;
@@ -345,7 +345,7 @@ public final class Search {
 
 		int[] moves = moveBuffers[ply];
 		int ttMoveForQ = ttHit ? MoveFactory.intToMove(TranspositionTable.TT.readPackedMove(bucket, slot)) : MoveFactory.MOVE_NONE;
-		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+		MovePicker picker = new MovePicker(board, pos, moveGen, moves, ttMoveForQ, MoveFactory.MOVE_NONE, true, (qDepth == 0 && !inCheck), inCheck);
 
 		boolean movePlayed = false;
 		int bestScore = standPat;
@@ -356,7 +356,7 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
-			int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType);
+			int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType, qDepth + 1);
 
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
@@ -425,5 +425,3 @@ public final class Search {
 		return pv;
 	}
 }
-
-

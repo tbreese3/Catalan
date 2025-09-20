@@ -88,7 +88,6 @@ public final class MoveGenerator {
 
   public static final long[] KING_ATK = new long[64];
   public static final long[] KNIGHT_ATK = new long[64];
-  public static final long[] BETWEEN = new long[64 * 64];
 
   static final long FILE_A = 0x0101_0101_0101_0101L;
   static final long FILE_H = FILE_A << 7;
@@ -129,8 +128,6 @@ public final class MoveGenerator {
       KING_ATK[sq] = k;
       KNIGHT_ATK[sq] = knightMask(r, f);
     }
-    for (int a = 0; a < 64; ++a)
-      for (int b = 0; b < 64; ++b) BETWEEN[a * 64 + b] = initBetween(a, b); // strict – no end-points
   }
 
   private static long addToMask(long m, int r, int f) {
@@ -145,23 +142,6 @@ public final class MoveGenerator {
     return m;
   }
 
-  private static long initBetween(int from, int to) {
-    if (from == to) return 0L;
-
-    int df = (to & 7) - (from & 7); // file  difference  (-7 … +7)
-    int dr = (to >>> 3) - (from >>> 3); // rank difference  (-7 … +7)
-
-    int step;
-    if (dr == 0) step = (df > 0 ? 1 : -1);
-    else if (df == 0) step = (dr > 0 ? 8 : -8);
-    else if (Math.abs(df) == Math.abs(dr)) step = (dr > 0 ? (df > 0 ? 9 : 7) : (df > 0 ? -7 : -9));
-    else return 0L;
-
-    long bb = 0L;
-    for (int sq = from + step; sq != to; sq += step) bb |= 1L << sq;
-    return bb;
-  }
-
   public int generateCaptures(long[] bb, int[] mv, int n) {
     boolean white = whiteToMove(bb);
     final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
@@ -172,7 +152,7 @@ public final class MoveGenerator {
     final long allCapt  = captMask;
 
     n  = addPawnCaptures(bb, white, occ, enemy, mv, n, usP);
-    n  = addPawnPushes   (bb[usP], white, occ, mv, n, usP, true, false, false, false);
+    n  = addPawnPushes   (bb[usP], white, occ, mv, n, usP, true, true, false, false);
     n  = addKnightMoves(bb[usN], allCapt, mv, n);
 
     long bishops = bb[usB];
@@ -213,7 +193,7 @@ public final class MoveGenerator {
     long quietMask = ~occ;
     long allQuiet  = quietMask;
 
-    n = addPawnPushes(bb[usP], white, occ, mv, n, usP, false, true, true,  true);
+    n = addPawnPushes(bb[usP], white, occ, mv, n, usP, false, false, true,  true);
     n = addKnightMoves(bb[usN], allQuiet, mv, n);
 
     for (long bishops = bb[usB]; bishops != 0; ) {
@@ -240,62 +220,6 @@ public final class MoveGenerator {
     return n;
   }
 
-  public int generateEvasions(long[] bb, int[] mv, int n) {
-    boolean white = whiteToMove(bb);
-    final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
-    final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
-    final long enemy = white ? (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]) : (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]);
-    final long occ   = own | enemy;
-
-    int  kSq      = Long.numberOfTrailingZeros(bb[usK]);
-    long checkers = attackersToSquare(bb, occ, kSq, /*usIsWhite=*/white);
-    long dblCheck = checkers & (checkers - 1);
-
-    if (dblCheck != 0) {
-      long kingMoves = KING_ATK[kSq] & ~own;
-      while (kingMoves != 0) {
-        int to = Long.numberOfTrailingZeros(kingMoves);
-        kingMoves &= kingMoves - 1;
-        mv[n++] = MoveFactory.Create(kSq, to, MoveFactory.FLAG_NORMAL);
-      }
-      return n;
-    }
-
-    int  checkerSq = Long.numberOfTrailingZeros(checkers);
-    long target    = checkers | between(kSq, checkerSq);
-
-    long kingTgt = KING_ATK[kSq] & ~own;
-    while (kingTgt != 0) {
-      int to = Long.numberOfTrailingZeros(kingTgt);
-      kingTgt &= kingTgt - 1;
-      mv[n++] = MoveFactory.Create(kSq, to, MoveFactory.FLAG_NORMAL);
-    }
-
-    n = addPawnCapturesTarget(bb, white, occ, enemy, mv, n, usP, target);
-    n = addPawnPushBlocks  (bb[usP], white, occ, mv, n, usP, target);
-
-    n = addKnightEvasions(bb[usN], target, mv, n);
-
-    for (long sliders = bb[usB] | bb[usR] | bb[usQ]; sliders != 0; ) {
-      int from = Long.numberOfTrailingZeros(sliders);
-      sliders &= sliders - 1;
-
-      long ray;
-      if ((bb[usB] & (1L << from)) != 0) {
-        ray   = bishopAtt(occ, from);
-      } else if ((bb[usR] & (1L << from)) != 0) {
-        ray   = rookAtt(occ, from);
-      } else {
-        ray   = queenAtt(occ, from);
-      }
-      long tgt = ray & target;
-      n = emitSliderMoves(mv, n, from, tgt);
-    }
-
-    n = addEnPassantEvasions(bb, white, mv, n, usP, checkerSq, checkers);
-    return n;
-  }
-
   public boolean castleLegal(long[] bb, int from, int to) {
     boolean white = from == 4;
     int rookFrom  = white ? (to == 6 ? 7  : 0) : (to == 62 ? 63 : 56);
@@ -313,31 +237,9 @@ public final class MoveGenerator {
     return true;
   }
 
-  private static int addEnPassantEvasions(long[] bb, boolean white, int[] mv, int n, int usP, int checkerSq, long checkers) {
-    int epSq = (int)((bb[META] & EP_MASK) >>> EP_SHIFT);
-    if (epSq == EP_NONE) return n;
-    if ( (checkers & (white ? bb[BP] : bb[WP])) == 0 ) return n;
-
-    int victim = white ? epSq - 8 : epSq + 8;
-    if (victim != checkerSq) return n;
-
-    long epBit = 1L << epSq;
-    long pawns = white ? (((epBit & ~FILE_A) >>> 9) | ((epBit & ~FILE_H) >>> 7)) & bb[WP] : (((epBit & ~FILE_H) <<  9) | ((epBit & ~FILE_A) <<  7)) & bb[BP];
-    while (pawns != 0) {
-      int from = Long.numberOfTrailingZeros(pawns);
-      pawns &= pawns - 1;
-      mv[n++] = MoveFactory.Create(from, epSq, MoveFactory.FLAG_EN_PASSANT);
-    }
-    return n;
-  }
-
   private boolean squareAttacked(long[] bb, boolean byWhite, int sq) {
     long occ =  bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
     return attackersToSquare(bb, occ, sq, /*usIsWhite=*/!byWhite) != 0;
-  }
-
-  private static long between(int from, int to) {
-    return BETWEEN[from * 64 + to];
   }
 
   private static int emitSliderMoves(int[] mv, int n, int from, long tgt) {
@@ -510,84 +412,172 @@ public final class MoveGenerator {
     return atk;
   }
 
-  private static int addPawnCapturesTarget(long[] bb, boolean white, long occ, long enemy, int[] mv, int n, int usP, long target) {
-
-    long pawns = bb[usP];
-    final long PROMO = white ? RANK_8 : RANK_1;
-
-    long capL = white ? ((pawns & ~FILE_A) << 7) : ((pawns & ~FILE_H) >>> 7);
-    int dL = white ? 7 : -7;
-
-    for (long m = capL & enemy & target; m != 0; m &= m - 1) {
-      int to = Long.numberOfTrailingZeros(m);
-      int from = to - dL;
-      if ((PROMO & (1L << to)) != 0) n = emitPromotions(mv, n, from, to);
-      else mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_NORMAL);
-    }
-
-    long capR = white ? ((pawns & ~FILE_H) << 9) : ((pawns & ~FILE_A) >>> 9);
-    int dR = white ? 9 : -9;
-    for (long m = capR & enemy & target; m != 0; m &= m - 1) {
-      int to = Long.numberOfTrailingZeros(m);
-      int from = to - dR;
-      if ((PROMO & (1L << to)) != 0) n = emitPromotions(mv, n, from, to);
-      else mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_NORMAL);
-    }
-    return n;
+  public boolean kingAttacked(long[] bb, boolean whiteSide) {
+    long occ =  bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
+    int kSq = Long.numberOfTrailingZeros(whiteSide ? bb[WK] : bb[BK]);
+    return attackersToSquare(bb, occ, kSq, /*usIsWhite=*/whiteSide) != 0;
   }
 
-  private static int addPawnPushBlocks(long pawns, boolean white, long occ, int[] mv, int n, int usP, long target) {
-    final int dir = white ? 8 : -8;
-    final long one = white ? ((pawns << 8) & ~occ) : ((pawns >>> 8) & ~occ);
-    long singleBlocks = one & target;
+  public int generateChecks(long[] bb, int[] mv, int n) {
+    boolean white = whiteToMove(bb);
+    final int usP = white ? WP : BP, usN = white ? WN : BN, usB = white ? WB : BB, usR = white ? WR : BR, usQ = white ? WQ : BQ, usK = white ? WK : BK;
+    final int thK = white ? BK : WK;
 
-    final long PROMO = white ? RANK_8 : RANK_1;
-    long promo = singleBlocks & PROMO;
-    long quiet = singleBlocks & ~PROMO;
+    final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
+    final long enemy = white ? (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]) : (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]);
+    final long occ   = own | enemy;
 
-    while (promo != 0) {
-      int to = Long.numberOfTrailingZeros(promo);
-      promo &= promo - 1;
-      n = emitPromotions(mv, n, to - dir, to);
+    int ourKing = Long.numberOfTrailingZeros(bb[usK]);
+    int theirKing = Long.numberOfTrailingZeros(bb[thK]);
+
+    long empty = ~occ;
+
+    final int PT_PAWN = 0, PT_KNIGHT = 1, PT_BISHOP = 2, PT_ROOK = 3, PT_QUEEN = 4;
+    long[] checkSquares = new long[5];
+    checkSquares[PT_PAWN ] = (white ? PAWN_ATK_B[theirKing] : PAWN_ATK_W[theirKing]) & empty;
+    checkSquares[PT_KNIGHT] = KNIGHT_ATK[theirKing] & empty;
+    checkSquares[PT_BISHOP] = bishopAtt(occ, theirKing) & empty;
+    checkSquares[PT_ROOK  ] = rookAtt(occ, theirKing) & empty;
+    checkSquares[PT_QUEEN ] = checkSquares[PT_BISHOP] | checkSquares[PT_ROOK];
+
+    long pinned = computePinned(bb, white, occ, ourKing);
+
+    if (white) {
+      long pawns = (checkSquares[PT_PAWN] >>> 8) & bb[WP];
+      while (pawns != 0) {
+        int from = Long.numberOfTrailingZeros(pawns);
+        pawns &= pawns - 1;
+        mv[n++] = MoveFactory.Create(from, from + 8, MoveFactory.FLAG_NORMAL);
+      }
+    } else {
+      long pawns = (checkSquares[PT_PAWN] << 8) & bb[BP];
+      while (pawns != 0) {
+        int from = Long.numberOfTrailingZeros(pawns);
+        pawns &= pawns - 1;
+        mv[n++] = MoveFactory.Create(from, from - 8, MoveFactory.FLAG_NORMAL);
+      }
     }
-    while (quiet != 0) {
-      int to = Long.numberOfTrailingZeros(quiet);
-      quiet &= quiet - 1;
-      mv[n++] = MoveFactory.Create(to - dir, to, MoveFactory.FLAG_NORMAL);
-    }
 
-    final long startRankForDoublePush = white ? RANK_3 : RANK_6;
-    long doublePushDestinations = white ? (((one & startRankForDoublePush) << 8) & ~occ) : (((one & startRankForDoublePush) >>> 8) & ~occ);
-    doublePushDestinations &= target;
-
-    while (doublePushDestinations != 0) {
-      int to = Long.numberOfTrailingZeros(doublePushDestinations);
-      doublePushDestinations &= doublePushDestinations - 1;
-      mv[n++] = MoveFactory.Create(to - 2 * dir, to, MoveFactory.FLAG_NORMAL);
-    }
-
-    return n;
-  }
-
-
-  private static int addKnightEvasions(long knights, long target, int[] mv, int n) {
+    long knights = bb[usN] & ~pinned;
     while (knights != 0) {
       int from = Long.numberOfTrailingZeros(knights);
       knights &= knights - 1;
-      long tgt = KNIGHT_ATK[from] & target;
+      long tgt = KNIGHT_ATK[from] & checkSquares[PT_KNIGHT];
       while (tgt != 0) {
         int to = Long.numberOfTrailingZeros(tgt);
         tgt &= tgt - 1;
         mv[n++] = MoveFactory.Create(from, to, MoveFactory.FLAG_NORMAL);
       }
     }
+
+    long bishops = bb[usB];
+    while (bishops != 0) {
+      int from = Long.numberOfTrailingZeros(bishops);
+      bishops &= bishops - 1;
+      long attacks = bishopAtt(occ, from) & checkSquares[PT_BISHOP];
+      if (((pinned >>> from) & 1L) != 0L) attacks &= lineMask(ourKing, from);
+      n = emitSliderMoves(mv, n, from, attacks);
+    }
+
+    long rooks = bb[usR];
+    while (rooks != 0) {
+      int from = Long.numberOfTrailingZeros(rooks);
+      rooks &= rooks - 1;
+      long attacks = rookAtt(occ, from) & checkSquares[PT_ROOK];
+      if (((pinned >>> from) & 1L) != 0L) attacks &= lineMask(ourKing, from);
+      n = emitSliderMoves(mv, n, from, attacks);
+    }
+
+    long queens = bb[usQ];
+    while (queens != 0) {
+      int from = Long.numberOfTrailingZeros(queens);
+      queens &= queens - 1;
+      long attacks = queenAtt(occ, from) & checkSquares[PT_QUEEN];
+      if (((pinned >>> from) & 1L) != 0L) attacks &= lineMask(ourKing, from);
+      n = emitSliderMoves(mv, n, from, attacks);
+    }
+
     return n;
   }
 
-  public boolean kingAttacked(long[] bb, boolean whiteSide) {
-    long occ =  bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
-    int kSq = Long.numberOfTrailingZeros(whiteSide ? bb[WK] : bb[BK]);
-    return attackersToSquare(bb, occ, kSq, /*usIsWhite=*/whiteSide) != 0;
+  private static long computePinned(long[] bb, boolean white, long occ, int ourKingSq) {
+    final long own   = white ? (bb[WP] | bb[WN] | bb[WB] | bb[WR] | bb[WQ] | bb[WK]) : (bb[BP] | bb[BN] | bb[BB] | bb[BR] | bb[BQ] | bb[BK]);
+    final long enemyB = white ? (bb[BB]) : (bb[WB]);
+    final long enemyR = white ? (bb[BR]) : (bb[WR]);
+    final long enemyQ = white ? (bb[BQ]) : (bb[WQ]);
+
+    long pinned = 0L;
+
+    int[] steps = { 8, -8, 1, -1, 9, 7, -7, -9 };
+    int[] dFiles = { 0, 0, 1, -1, 1, -1, 1, -1 };
+    long[] enemyMask = {
+            enemyR | enemyQ,
+            enemyR | enemyQ,
+            enemyR | enemyQ,
+            enemyR | enemyQ,
+            enemyB | enemyQ,
+            enemyB | enemyQ,
+            enemyB | enemyQ,
+            enemyB | enemyQ
+    };
+
+    for (int i = 0; i < steps.length; i++) {
+      int step = steps[i];
+      int df = dFiles[i];
+      int prev = ourKingSq;
+      int seenOur = -1;
+      while (true) {
+        int next = prev + step;
+        if (next < 0 || next >= 64) break;
+        if (((next & 7) - (prev & 7)) != df) break;
+        long bit = 1L << next;
+        if ((occ & bit) == 0) { prev = next; continue; }
+        if ((own & bit) != 0) {
+          if (seenOur == -1) { seenOur = next; prev = next; continue; }
+          else break;
+        } else {
+          if (seenOur != -1 && (enemyMask[i] & bit) != 0L) pinned |= (1L << seenOur);
+          break;
+        }
+      }
+    }
+    return pinned;
+  }
+
+  private static long lineMask(int a, int b) {
+    int ar = a >>> 3, af = a & 7;
+    int br = b >>> 3, bf = b & 7;
+    int step, df;
+    if (ar == br) { step = (bf > af ? 1 : -1); df = (bf > af ? 1 : -1); }
+    else if (af == bf) { step = (br > ar ? 8 : -8); df = 0; }
+    else if (Math.abs(bf - af) == Math.abs(br - ar)) {
+      boolean up = br > ar; boolean right = bf > af;
+      if (up && right) { step = 9; df = 1; }
+      else if (up && !right) { step = 7; df = -1; }
+      else if (!up && right) { step = -7; df = 1; }
+      else { step = -9; df = -1; }
+    } else {
+      return 0L;
+    }
+
+    long mask = 0L;
+    mask |= rayFrom(a, step, df);
+    mask |= rayFrom(a, -step, -df);
+    mask |= (1L << a);
+    return mask;
+  }
+
+  private static long rayFrom(int start, int step, int df) {
+    long m = 0L;
+    int prev = start;
+    while (true) {
+      int next = prev + step;
+      if (next < 0 || next >= 64) break;
+      if (((next & 7) - (prev & 7)) != df) break;
+      m |= (1L << next);
+      prev = next;
+    }
+    return m;
   }
 
   private static int emitPromotions(int[] moves, int n, int from, int to) {
@@ -631,13 +621,8 @@ public final class MoveGenerator {
   public int getFirstLegalMove(long[] bb) {
     int[] mv = new int[256];
     int n;
-    boolean inCheck = kingAttacked(bb, whiteToMove(bb));
-    if (inCheck) {
-      n = generateEvasions(bb, mv, 0);
-    } else {
-      n = generateCaptures(bb, mv, 0);
-      n = generateQuiets(bb, mv, n);
-    }
+    n = generateCaptures(bb, mv, 0);
+    n = generateQuiets(bb, mv, n);
     if (n == 0) return 0;
 
     PositionFactory pos = new PositionFactory();

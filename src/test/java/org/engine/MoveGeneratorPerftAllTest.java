@@ -18,8 +18,7 @@ public class MoveGeneratorPerftAllTest {
     private static final PositionFactory POS_FACTORY = new PositionFactory();
     private static final MoveGenerator   GEN         = new MoveGenerator();
 
-    private record Vec(String fen,int depth,long expNodes,long expPseudo,
-                       long expCaps,long expQuiets,long expEvas) {}
+    private record Vec(String fen,int depth,long expNodes,long expCaps,long expQuiets, long expChecks) {}
 
     private List<Vec> vecs;
 
@@ -34,26 +33,24 @@ public class MoveGeneratorPerftAllTest {
                     .filter(l -> !(l.isEmpty() || l.startsWith("#")))
                     .forEach(l -> {
                         String[] p = l.split(";");
-                        if (p.length < 7) return;
                         vecs.add(new Vec(
                                 p[0].trim(),
                                 Integer.parseInt(p[1].replaceAll("\\D","")),
                                 Long.parseLong(p[2].replaceAll("\\D","")),
                                 Long.parseLong(p[3].replaceAll("\\D","")),
                                 Long.parseLong(p[4].replaceAll("\\D","")),
-                                Long.parseLong(p[5].replaceAll("\\D","")),
-                                Long.parseLong(p[6].replaceAll("\\D",""))));
+                                Long.parseLong(p[5].replaceAll("\\D",""))));
                     });
         }
         Assertions.assertFalse(vecs.isEmpty(), "qbbAll.txt missing / empty");
     }
 
-    private long totNodes, totPseudo, totCaps, totQuiets, totEvas, timeNs;
-    private long expNodesTot, expPseudoTot, expCapsTot, expQuietsTot, expEvasTot;
+    private long totNodes, totCaps, totQuiets, totChecks, timeNs;
+    private long expNodesTot, expCapsTot, expQuietsTot, expChecks;
 
     Stream<Vec> vecStream(){ return vecs.stream(); }
 
-    private static final class C { long nodes,pseudo,caps,quiets,evas; }
+    private static final class C { long nodes,caps,quiets,checks; }
 
     @ParameterizedTest(name="xPerft {index}")
     @MethodSource("vecStream")
@@ -66,23 +63,20 @@ public class MoveGeneratorPerftAllTest {
         timeNs += System.nanoTime() - t0;
 
         totNodes  += got;
-        totPseudo += c.pseudo;
         totCaps   += c.caps;
         totQuiets += c.quiets;
-        totEvas   += c.evas;
+        totChecks += c.checks;
 
         Assertions.assertAll(
                 () -> Assertions.assertEquals(v.expNodes(),  got,    "nodes"),
-                () -> Assertions.assertEquals(v.expPseudo(), c.pseudo,"pseudo"),
-                () -> Assertions.assertEquals(v.expCaps(),   c.caps,  "captures"),
-                () -> Assertions.assertEquals(v.expQuiets(), c.quiets,"quiets"),
-                () -> Assertions.assertEquals(v.expEvas(),   c.evas,  "evasions")
+                () -> Assertions.assertEquals(v.expCaps(),  c.caps,    "captures"),
+                () -> Assertions.assertEquals(v.expQuiets(),  c.quiets,    "captures"),
+                () -> Assertions.assertEquals(v.expChecks(), c.checks, "checks")
         );
         expNodesTot  += v.expNodes();
-        expPseudoTot += v.expPseudo();
         expCapsTot   += v.expCaps();
         expQuietsTot += v.expQuiets();
-        expEvasTot   += v.expEvas();
+        expChecks += v.expChecks();
     }
 
     @AfterAll
@@ -94,24 +88,22 @@ public class MoveGeneratorPerftAllTest {
         counter      actual        expected        Δ
         --------------------------------------------------------------
         nodes   : %,15d  / %,15d  (%+d)
-        pseudo  : %,15d  / %,15d  (%+d)
         caps    : %,15d  / %,15d  (%+d)
         quiets  : %,15d  / %,15d  (%+d)
-        evas    : %,15d  / %,15d  (%+d)
+        checks  : %,15d  / %,15d  (%+d)
         --------------------------------------------------------------
         time    : %.3f s   → %,d NPS
         ───────────────────────────────────────────────────────────────
         """,
                 totNodes,  expNodesTot,  totNodes  - expNodesTot,
-                totPseudo, expPseudoTot, totPseudo - expPseudoTot,
                 totCaps,   expCapsTot,   totCaps   - expCapsTot,
                 totQuiets, expQuietsTot, totQuiets - expQuietsTot,
-                totEvas,   expEvasTot,   totEvas   - expEvasTot,
+                totChecks, expChecks, totChecks - expChecks,
                 secs, (long)(totNodes / Math.max(1e-9, secs)));
     }
 
     private static final int MAX_PLY  = 64;
-    private static final int LIST_CAP = 256;
+    private static final int LIST_CAP = 500;
     private static final int[][] MOVES = new int[MAX_PLY][LIST_CAP];
 
     private long perft(long[] bb,int depth,int ply,C cnt){
@@ -121,42 +113,43 @@ public class MoveGeneratorPerftAllTest {
         boolean inCheck  = GEN.kingAttacked(bb, stmWhite);
 
         int[] moves = MOVES[ply];
+
+        if(!inCheck)
+        {
+            int caps = GEN.generateChecks(bb, moves, 0);
+            for(int i = 0; i < caps; i++)
+            {
+                if (!POS_FACTORY.makeMoveInPlace(bb, moves[i], GEN)) continue;
+                cnt.checks++;
+                POS_FACTORY.undoMoveInPlace(bb);
+            }
+        }
+
         int legalCnt;
 
-        if (inCheck){
-            legalCnt     = GEN.generateEvasions(bb, moves, 0);
-            cnt.evas    += legalCnt;
-            cnt.pseudo  += legalCnt;
-        } else {
-            int caps     = GEN.generateCaptures(bb, moves, 0);
-            int total    = GEN.generateQuiets  (bb, moves, caps);
-            int quiets   = total - caps;
+        int caps     = GEN.generateCaptures(bb, moves, 0);
+        int total    = GEN.generateQuiets  (bb, moves, caps);
 
-            legalCnt     = total;
-            cnt.caps    += caps;
-            cnt.quiets  += quiets;
-            cnt.pseudo  += total;
-        }
+        legalCnt     = total;
 
         long nodes = 0;
         for (int i = 0; i < legalCnt; ++i){
             int mv = moves[i];
 
-            if (capturesKing(mv, bb, stmWhite))
-                throw new AssertionError("Generated king capture: "
-                        + moveToUci(mv) + "  FEN " + POS_FACTORY.toFen(bb));
-
             if (!POS_FACTORY.makeMoveInPlace(bb, mv, GEN)) continue;
             nodes += perft(bb, depth-1, ply+1, cnt);
+            if(i < caps)
+            {
+                cnt.caps++;
+            }
+            else
+            {
+                cnt.quiets++;
+            }
+
             POS_FACTORY.undoMoveInPlace(bb);
         }
         return nodes;
-    }
-
-    private static boolean capturesKing(int mv,long[] bb,boolean stmWhite){
-        int to   = mv & 0x3F;
-        int enemyK = stmWhite ? BK : WK;
-        return (bb[enemyK] & (1L << to)) != 0;
     }
 
     private static String moveToUci(int mv){
@@ -172,5 +165,3 @@ public class MoveGeneratorPerftAllTest {
         return "" + (char)('a'+(sq&7)) + (char)('1'+(sq>>>3));
     }
 }
-
-

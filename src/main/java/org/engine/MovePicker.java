@@ -7,38 +7,32 @@ final class MovePicker {
 	private final int[] buffer;
 	private final int ttMove;
 	private final int killerMove;
-	private final boolean includeQuiets;
+	private final boolean isQSearch;
+	private final boolean genChecks;
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+	private enum Stage { TT, KILLER, CAPTURES, QUIETS, CHECKS, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
 	private boolean killerTried;
+	private boolean inCheck;
 
-    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	public MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int ttMove, int killerMove, boolean isQSearch, boolean genChecks, boolean inCheck) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.buffer = moveBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
-		this.includeQuiets = includeQuiets;
+		this.isQSearch = isQSearch;
+		this.genChecks = genChecks;
+		this.inCheck = inCheck;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
 		this.ttTried = false;
 		this.killerTried = false;
-	}
-
-	private boolean isCaptureOrTactical(int m) {
-		int flags = MoveFactory.GetFlags(m);
-		if (flags == MoveFactory.FLAG_EN_PASSANT) return true;
-		if (flags == MoveFactory.FLAG_PROMOTION) return true;
-		if (flags == MoveFactory.FLAG_CASTLE) return false;
-		int to = MoveFactory.GetTo(m);
-		int target = PositionFactory.pieceAt(board, to);
-		return target != -1;
 	}
 
 	int next() {
@@ -53,8 +47,8 @@ final class MovePicker {
 					break;
 				}
                 case KILLER: {
-                    stage = Stage.CAPTURES;
-					if (!includeQuiets) break;
+					stage = Stage.CAPTURES;
+					if (isQSearch || inCheck) break;
                     if (!killerTried && !MoveFactory.isNone(killerMove) && killerMove != ttMove) {
 						killerTried = true;
                         if (pos.isPseudoLegalMove(board, killerMove, gen)) return killerMove;
@@ -73,7 +67,14 @@ final class MovePicker {
 						return m;
 					}
 					count = 0;
-                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
+					if(inCheck || !isQSearch)
+					{
+						stage = Stage.QUIETS;
+					}
+					else {
+						if (genChecks) stage = Stage.CHECKS;
+						else stage = Stage.DONE;
+					}
 					break;
 				}
                 case QUIETS: {
@@ -87,7 +88,23 @@ final class MovePicker {
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
-                    stage = Stage.DONE;
+					count = 0;
+					stage = Stage.DONE;
+					break;
+				}
+				case CHECKS: {
+					if (count == 0) {
+						index = 0;
+						count = gen.generateChecks(board, buffer, 0);
+					}
+					while (index < count) {
+						int m = buffer[index++];
+						m = MoveFactory.intToMove(m);
+						if (m == ttMove || m == killerMove) continue;
+						return m;
+					}
+					count = 0;
+					stage = Stage.DONE;
 					break;
 				}
                 default:
