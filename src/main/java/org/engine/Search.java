@@ -166,6 +166,7 @@ public final class Search {
 
 	private int negamax(long[] board, int depth, int ply, int alpha, int beta, NodeType nodeType) {
 		StackEntry se = stack[ply];
+		se.staticEval = SCORE_NONE;
 		se.pvLength = 0;
 		if (stopCheck()) return 0;
 		nodes++;
@@ -200,7 +201,7 @@ public final class Search {
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
-		if (se.staticEval == SCORE_NONE) {
+		if (!se.inCheck) {
 			int rawEval = evaluate(board);
 			se.staticEval = rawEval;
 			boolean isPV = (nodeType != NodeType.nonPVNode);
