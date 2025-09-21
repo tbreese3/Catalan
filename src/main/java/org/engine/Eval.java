@@ -331,7 +331,7 @@ public final class Eval {
     output /= 255;
     output += L2_BIASES[outputBucket];
     output *= 400;
-    return output /= 16320;
+    return (int) (output /= 16320);
   }
 
   private static int getIndexWhite(int square, int piece) {
