@@ -200,11 +200,16 @@ public final class Search {
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
-		if (se.staticEval == SCORE_NONE) {
-			int rawEval = evaluate(board);
+		if (!inCheck && se.staticEval == SCORE_NONE) {
+			int rawEval;
+			if (ttHit) {
+				rawEval = TranspositionTable.TT.readEval(bucket, slot);
+			} else {
+				rawEval = evaluate(board);
+				boolean isPV = (nodeType != NodeType.nonPVNode);
+				TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, isPV);
+			}
 			se.staticEval = rawEval;
-			boolean isPV = (nodeType != NodeType.nonPVNode);
-			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, false);
 		}
 
 		// Null-move pruning
@@ -291,7 +296,7 @@ public final class Search {
 
 		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
-		int rawEval = se.staticEval == SCORE_NONE ? evaluate(board) : se.staticEval;
+		int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
 		boolean isPV = (nodeType != NodeType.nonPVNode);
 		TranspositionTable.TT.store(pos.zobrist(board), (short) MoveFactory.intToMove(bestMove), storeScore, rawEval, bound, depth, isPV, isPV || prevWasPV);
@@ -389,7 +394,7 @@ public final class Search {
 		else bound = TranspositionTable.BOUND_UPPER;
 
 		int storeScore = TranspositionTable.scoreToTT(bestScore, ply);
-		int rawEval = (standPat != -INFTY) ? standPat : evaluate(board);
+		int rawEval = (standPat != -INFTY) ? standPat : 0;
 		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
 		boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
 		boolean isPV = (nodeType != NodeType.nonPVNode);
