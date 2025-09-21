@@ -7,7 +7,8 @@ final class MovePicker {
 	private final int[] buffer;
 	private final int ttMove;
 	private final int killerMove;
-	private final boolean includeQuiets;
+	private final boolean isQSearch;
+	private final boolean inCheck;
 
     private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
     private Stage stage;
@@ -16,14 +17,15 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int ttMove, int killerMove, boolean isQSearch, boolean inCheck) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.buffer = moveBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
-		this.includeQuiets = includeQuiets;
+		this.isQSearch = isQSearch;
+		this.inCheck = inCheck;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
@@ -54,7 +56,7 @@ final class MovePicker {
 				}
                 case KILLER: {
                     stage = Stage.CAPTURES;
-					if (!includeQuiets) break;
+					if (isQSearch || inCheck) break;
                     if (!killerTried && !MoveFactory.isNone(killerMove) && killerMove != ttMove) {
 						killerTried = true;
                         if (pos.isPseudoLegalMove(board, killerMove, gen)) return killerMove;
@@ -73,7 +75,7 @@ final class MovePicker {
 						return m;
 					}
 					count = 0;
-                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
+                    stage = (!isQSearch || inCheck) ? Stage.QUIETS : Stage.DONE;
 					break;
 				}
                 case QUIETS: {
