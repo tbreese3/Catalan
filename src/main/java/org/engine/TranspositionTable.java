@@ -60,6 +60,23 @@ public final class TranspositionTable {
         age = 1;
     }
 
+    // Reference-style API: resize, nextSearch, hashfull, prefetch, probe
+    public synchronized void resize(long megaBytes) {
+        init(megaBytes);
+    }
+
+    public void nextSearch() {
+        updateTableAge();
+    }
+
+    public int hashfull() {
+        return getHashfull();
+    }
+
+    public void prefetch(long key) {
+        // No-op on Java; left for API parity with reference
+    }
+
     public int probeBucket(long zobristKey) {
         if (bodies == null || numBuckets == 0) return -1;
         return (int) index(zobristKey);
@@ -169,6 +186,154 @@ public final class TranspositionTable {
     public static int ageFromTT(int ageBoundPV) { return (ageBoundPV >>> 3) & AGE_MASK; }
     public static int packToTT(int bound, boolean wasPV, int age) {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
+    }
+
+    // Reference-style Entry and probe interface
+    public static final class ProbeResult {
+        public final Entry entry;
+        public final boolean hit;
+
+        private ProbeResult(Entry entry, boolean hit) {
+            this.entry = entry;
+            this.hit = hit;
+        }
+    }
+
+    public final class Entry {
+        private final int index;
+
+        private Entry(int index) {
+            this.index = index;
+        }
+
+        public boolean matches(long key) {
+            return (keys[index] & 0xFFFF) == ((int) key & 0xFFFF);
+        }
+
+        public int getStaticEval() {
+            long body = bodies[index];
+            return decodeEval(body);
+        }
+
+        public int getDepth() {
+            long body = bodies[index];
+            return decodeDepth(body) & 0xFF;
+        }
+
+        public int getBound() {
+            long body = bodies[index];
+            return boundFromTT(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public int getAge() {
+            long body = bodies[index];
+            return ageFromTT(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public short getPackedMove() {
+            long body = bodies[index];
+            return decodePackedMove(body);
+        }
+
+        public int getScore(int ply) {
+            long body = bodies[index];
+            int s = decodeScore(body);
+            if (s == SCORE_NONE_TT) return SCORE_NONE_TT;
+            return scoreFromTT(s, ply);
+        }
+
+        public boolean wasPV() {
+            long body = bodies[index];
+            return formerPV(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public boolean isEmpty() {
+            long body = bodies[index];
+            short s = decodeScore(body);
+            byte ab = decodeAgeBoundPV(body);
+            return s == 0 && ab == 0;
+        }
+
+        public int getAgeDistance() {
+            int a = getAge();
+            return (MAX_AGE + (age & 0xFF) - (a & 0xFF)) & AGE_MASK;
+        }
+
+        public void store(long key, int bound, int depth, int move, int score, int eval, boolean isPV, int ply) {
+            // Load current
+            long body = bodies[index];
+            short existingKey = keys[index];
+
+            short bodyMove = decodePackedMove(body);
+            short bodyScore = decodeScore(body);
+            short bodyEval = decodeEval(body);
+            byte bodyDepth = decodeDepth(body);
+            byte bodyAbpv = decodeAgeBoundPV(body);
+
+            // Move replacement: on key mismatch or provided move
+            short newPackedMove = bodyMove;
+            int wantKey = (int) (key & 0xFFFFL);
+            if ((move & 0xFFFF) != 0 || (existingKey & 0xFFFF) != wantKey) {
+                newPackedMove = (short) (move & 0xFFFF);
+            }
+
+            boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
+
+            int adjScore;
+            if (score == SCORE_NONE_TT) adjScore = score;
+            else adjScore = scoreToTT(score, ply);
+
+            boolean overwrite = (bound == BOUND_EXACT)
+                    || keyMismatch
+                    || (depth + 5 + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
+                    || (ageFromTT(bodyAbpv & 0xFF) != (age & 0xFF));
+
+            if (overwrite) {
+                bodyDepth = (byte) clamp(depth, 0, 255);
+                // Persist PV bit if it was ever PV
+                boolean persistPV = isPV || ((bodyAbpv & 0xFF) != 0 && formerPV(bodyAbpv & 0xFF));
+                bodyAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
+                bodyScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
+                bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
+            }
+
+            long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
+            bodies[index] = newBody;
+            keys[index] = (short) wantKey;
+        }
+    }
+
+    public ProbeResult probe(long key) {
+        if (bodies == null || numBuckets == 0) return new ProbeResult(new Entry(0), false);
+        int bucket = (int) index(key);
+        int base = bucketBase(bucket);
+        int wantKey = (int) (key & 0xFFFFL);
+        int bestSlot = 0;
+        int bestMetric = Integer.MAX_VALUE;
+
+        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+            int idx = base + slot;
+            short k = keys[idx];
+            if ((k & 0xFFFF) == wantKey) {
+                Entry e = new Entry(idx);
+                boolean hit = !e.isEmpty();
+                return new ProbeResult(e, hit);
+            }
+
+            long body = bodies[idx];
+            byte abpv = decodeAgeBoundPV(body);
+            byte entryDepth = decodeDepth(body);
+
+            int ageDelta = (MAX_AGE + (age & 0xFF) - ageFromTT(abpv & 0xFF)) & AGE_MASK;
+            int metric = (entryDepth & 0xFF) - ageDelta * 4;
+            if (slot == 0 || metric < bestMetric) {
+                bestMetric = metric;
+                bestSlot = slot;
+            }
+        }
+
+        int idx = base + bestSlot;
+        return new ProbeResult(new Entry(idx), false);
     }
 
     private void storeByKey(long posKey, short move, int score, int eval, int bound, int depth, boolean pvNode, boolean wasPV) {
