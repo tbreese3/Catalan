@@ -18,7 +18,7 @@ public final class Eval {
   static final String networkPath = "/net/network.bin";
 
   public static final int INPUT_SIZE = 768;
-  public static final int HL_SIZE = 2048;
+  public static final int HL_SIZE = 1792;
   static final int OUTPUT_BUCKETS = 8;
   private static final int DIVISOR = (32 + OUTPUT_BUCKETS - 1) / OUTPUT_BUCKETS;
   private static final int QA = 255;
