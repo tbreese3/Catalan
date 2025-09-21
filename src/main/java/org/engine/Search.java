@@ -200,7 +200,10 @@ public final class Search {
 		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
-		if (se.staticEval == SCORE_NONE) {
+		if(inCheck) {
+			se.staticEval = SCORE_NONE;
+		}
+		else {
 			int rawEval = evaluate(board);
 			se.staticEval = rawEval;
 			boolean isPV = (nodeType != NodeType.nonPVNode);
