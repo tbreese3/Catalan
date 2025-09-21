@@ -374,7 +374,6 @@ public final class Search {
 
             Eval.doMoveAccumulator(nnueState, board, move);
             if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
-            TranspositionTable.TT.prefetch(pos.zobrist(board));
 			movePlayed = true;
 
 			int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType);
