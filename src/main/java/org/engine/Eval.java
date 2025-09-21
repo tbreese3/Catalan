@@ -13,7 +13,7 @@ import static org.engine.PositionFactory.*;
 public final class Eval {
   private Eval() {}
 
-  private final static int[] screluPreCalc = new int[Short.MAX_VALUE - Short.MIN_VALUE + 1];
+  private final static char[] screluPreCalc = new char[Short.MAX_VALUE - Short.MIN_VALUE + 1];
 
   static final String networkPath = "/net/network.bin";
 
@@ -53,7 +53,7 @@ public final class Eval {
 
   public static void initializeEval() {
     for (int i = Short.MIN_VALUE; i <= Short.MAX_VALUE; i++) {
-      screluPreCalc[i - (int) Short.MIN_VALUE] = screlu((short) i);
+      screluPreCalc[i - (int) Short.MIN_VALUE] = (char) screlu((short) i);
     }
 
     try (InputStream is = Eval.class.getResourceAsStream(networkPath)) {
@@ -299,13 +299,35 @@ public final class Eval {
     short[] oppAccumulator = whiteToMove ? nnueState.blackAccumulator[nnueState.currentAccumulator] : nnueState.whiteAccumulator[nnueState.currentAccumulator];
     short[] stmWeights = L2_WEIGHTS[outputBucket][0];
     short[] oppWeights = L2_WEIGHTS[outputBucket][1];
-    int output = 0;
-    for (i = 0; i < 2048; ++i) {
-      output += screluPreCalc[stmAccumulator[i] - Short.MIN_VALUE] * stmWeights[i];
+    long output = 0;
+    final char[] lut = screluPreCalc;
+    final int offset = -(int) Short.MIN_VALUE; // 32768
+
+    int s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0;
+    for (i = 0; i < HL_SIZE; i += 8) {
+      s0 += lut[stmAccumulator[i] + offset] * stmWeights[i];
+      s1 += lut[stmAccumulator[i + 1] + offset] * stmWeights[i + 1];
+      s2 += lut[stmAccumulator[i + 2] + offset] * stmWeights[i + 2];
+      s3 += lut[stmAccumulator[i + 3] + offset] * stmWeights[i + 3];
+      s4 += lut[stmAccumulator[i + 4] + offset] * stmWeights[i + 4];
+      s5 += lut[stmAccumulator[i + 5] + offset] * stmWeights[i + 5];
+      s6 += lut[stmAccumulator[i + 6] + offset] * stmWeights[i + 6];
+      s7 += lut[stmAccumulator[i + 7] + offset] * stmWeights[i + 7];
     }
-    for (i = 0; i < 2048; ++i) {
-      output += screluPreCalc[oppAccumulator[i] - Short.MIN_VALUE] * oppWeights[i];
+    output += ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
+
+    s0 = s1 = s2 = s3 = s4 = s5 = s6 = s7 = 0;
+    for (i = 0; i < HL_SIZE; i += 8) {
+      s0 += lut[oppAccumulator[i] + offset] * oppWeights[i];
+      s1 += lut[oppAccumulator[i + 1] + offset] * oppWeights[i + 1];
+      s2 += lut[oppAccumulator[i + 2] + offset] * oppWeights[i + 2];
+      s3 += lut[oppAccumulator[i + 3] + offset] * oppWeights[i + 3];
+      s4 += lut[oppAccumulator[i + 4] + offset] * oppWeights[i + 4];
+      s5 += lut[oppAccumulator[i + 5] + offset] * oppWeights[i + 5];
+      s6 += lut[oppAccumulator[i + 6] + offset] * oppWeights[i + 6];
+      s7 += lut[oppAccumulator[i + 7] + offset] * oppWeights[i + 7];
     }
+    output += ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));
     output /= 255;
     output += L2_BIASES[outputBucket];
     output *= 400;
