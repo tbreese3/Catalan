@@ -300,10 +300,10 @@ public final class Eval {
     short[] stmWeights = L2_WEIGHTS[outputBucket][0];
     short[] oppWeights = L2_WEIGHTS[outputBucket][1];
     int output = 0;
-    for (i = 0; i < 2048; ++i) {
+    for (i = 0; i < 1792; ++i) {
       output += screluPreCalc[stmAccumulator[i] - Short.MIN_VALUE] * stmWeights[i];
     }
-    for (i = 0; i < 2048; ++i) {
+    for (i = 0; i < 1792; ++i) {
       output += screluPreCalc[oppAccumulator[i] - Short.MIN_VALUE] * oppWeights[i];
     }
     output /= 255;
