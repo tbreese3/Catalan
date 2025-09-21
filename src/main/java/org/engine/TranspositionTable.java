@@ -36,6 +36,36 @@ public final class TranspositionTable {
         this.age = 1;
     }
 
+    public static final class Entry {
+        public final short packedMove;
+        public final int score;
+        public final int eval;
+        public final int depth;
+        public final int bound;
+        public final boolean pv;
+
+        public Entry(short packedMove, int score, int eval, int depth, int bound, boolean pv) {
+            this.packedMove = packedMove;
+            this.score = score;
+            this.eval = eval;
+            this.depth = depth;
+            this.bound = bound;
+            this.pv = pv;
+        }
+    }
+
+    public static final class ReadResult {
+        public final boolean hit;
+        public final int slotIndex;
+        public final Entry entry;
+
+        public ReadResult(boolean hit, int slotIndex, Entry entry) {
+            this.hit = hit;
+            this.slotIndex = slotIndex;
+            this.entry = entry;
+        }
+    }
+
     public synchronized void init(long megaBytes) {
         final long ONE_MB = 1024L * 1024L;
         final long hashSize = megaBytes * ONE_MB;
@@ -131,25 +161,120 @@ public final class TranspositionTable {
 
     public int getHashfull() {
         if (bodies == null || numBuckets == 0) return 0;
-        int toSample = (int) Math.min(2000L, numBuckets);
+        int toSample = (int) Math.min(1000L, numBuckets);
         int hit = 0;
+        int curAge = age & 0xFF;
         for (int i = 0; i < toSample; i++) {
             int base = bucketBase(i);
             for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
                 int idx = base + slot;
-                short key = keys[idx];
-                if ((key & 0xFFFF) != 0) {
-                    long body = bodies[idx];
-                    byte abpv = decodeAgeBoundPV(body);
-                    if (ageFromTT(abpv) == age) hit++;
-                }
+                long body = bodies[idx];
+                int abpv = decodeAgeBoundPV(body) & 0xFF;
+                boolean valid = (boundFromTT(abpv) != BOUND_NONE);
+                if (valid && (ageFromTT(abpv) & 0xFF) == curAge) hit++;
             }
         }
-        return hit / (2 * ENTRIES_PER_BUCKET);
+        return hit / ENTRIES_PER_BUCKET;
     }
 
     public void updateTableAge() {
         age = (byte) ((age + 1) & AGE_MASK);
+    }
+
+    public ReadResult read(long posKey, int halfmoveClock, int ply) {
+        if (bodies == null || numBuckets == 0) return new ReadResult(false, -1, null);
+
+        int bucket = (int) index(posKey);
+        int base = bucketBase(bucket);
+        int wantKey = (int) (posKey & 0xFFFFL);
+
+        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+            int idx = base + slot;
+            if ((keys[idx] & 0xFFFF) == wantKey) {
+                long body = bodies[idx];
+                int depth = decodeDepth(body) & 0xFF;
+                if (depth != 0) {
+                    short mv = decodePackedMove(body);
+                    int stored = decodeScore(body);
+                    int score = scoreFromTT(stored, ply);
+                    int eval = (short) decodeEval(body);
+                    int abpv = decodeAgeBoundPV(body) & 0xFF;
+                    int bound = boundFromTT(abpv);
+                    boolean pv = formerPV(abpv);
+                    int apiDepth = (depth == 255) ? -1 : depth;
+                    return new ReadResult(true, idx, new Entry(mv, score, eval, apiDepth, bound, pv));
+                }
+            }
+        }
+
+        int bestSlot = 0;
+        int bestMetric = Integer.MAX_VALUE;
+        int tableAge = age & 0xFF;
+        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+            int idx = base + slot;
+            long body = bodies[idx];
+            int entryDepth = decodeDepth(body) & 0xFF;
+            int entryAge = ageFromTT(decodeAgeBoundPV(body) & 0xFF) & 0xFF;
+            int relative = (MAX_AGE + tableAge - entryAge) & AGE_MASK;
+            int metric = entryDepth - 4 * relative;
+            if (slot == 0 || metric < bestMetric) { bestMetric = metric; bestSlot = slot; }
+        }
+
+        return new ReadResult(false, base + bestSlot, null);
+    }
+
+    public void writeAt(int slotIndex,
+                        long posKey,
+                        int depth,
+                        int eval,
+                        int score,
+                        int bound,
+                        short packedMove,
+                        boolean pvAggregated) {
+        if (bodies == null || numBuckets == 0 || slotIndex < 0) return;
+
+        int wantKey = (int) (posKey & 0xFFFFL);
+        int tableAge = age & 0xFF;
+
+        long body = bodies[slotIndex];
+        short existingKey = keys[slotIndex];
+
+        short curMove = decodePackedMove(body);
+        short curScore = decodeScore(body);
+        short curEval = decodeEval(body);
+        int curDepth = decodeDepth(body) & 0xFF;
+        int curAbpv = decodeAgeBoundPV(body) & 0xFF;
+
+        short newMove = curMove;
+        if ((packedMove & 0xFFFF) != 0 || (existingKey & 0xFFFF) != wantKey) {
+            newMove = packedMove;
+        }
+
+        boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
+        int writeDepthPriority = (depth == 255) ? -1 : depth;
+        boolean overwrite = keyMismatch
+                || bound == BOUND_EXACT
+                || (writeDepthPriority + 4 + (pvAggregated ? 2 : 0) > curDepth)
+                || ((ageFromTT(curAbpv) & 0xFF) != tableAge);
+
+        if (!overwrite) {
+            int curBound = boundFromTT(curAbpv);
+            if (curDepth >= 5 && curBound != BOUND_EXACT) {
+                curDepth = Math.max(0, curDepth - 1);
+            }
+            long keep = encodeBody(newMove, curScore, curEval, (byte) curDepth, (byte) curAbpv);
+            bodies[slotIndex] = keep;
+            keys[slotIndex] = (short) wantKey;
+            return;
+        }
+
+        int clampedDepth = clamp(depth, 0, 255);
+        int abpv = packToTT(bound, pvAggregated, tableAge);
+        short s = (short) clamp(score, Short.MIN_VALUE, Short.MAX_VALUE);
+        short e = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
+        long encoded = encodeBody(newMove, s, e, (byte) clampedDepth, (byte) abpv);
+        bodies[slotIndex] = encoded;
+        keys[slotIndex] = (short) wantKey;
     }
 
     public static int scoreToTT(int score, int ply) {
