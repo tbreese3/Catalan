@@ -5,9 +5,13 @@ final class MovePicker {
 	private final PositionFactory pos;
 	private final MoveGenerator gen;
 	private final int[] buffer;
+	private final int[] scores;
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
+
+	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
+	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
     private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
     private Stage stage;
@@ -16,11 +20,12 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.buffer = moveBuffer;
+		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
 		this.includeQuiets = includeQuiets;
@@ -31,14 +36,61 @@ final class MovePicker {
 		this.killerTried = false;
 	}
 
-	private boolean isCaptureOrTactical(int m) {
-		int flags = MoveFactory.GetFlags(m);
-		if (flags == MoveFactory.FLAG_EN_PASSANT) return true;
-		if (flags == MoveFactory.FLAG_PROMOTION) return true;
-		if (flags == MoveFactory.FLAG_CASTLE) return false;
-		int to = MoveFactory.GetTo(m);
-		int target = PositionFactory.pieceAt(board, to);
-		return target != -1;
+	private int scoreCaptureMVVLVA(int mv) {
+		int from = MoveFactory.GetFrom(mv);
+		int to = MoveFactory.GetTo(mv);
+		int flags = MoveFactory.GetFlags(mv);
+
+		int attacker = PositionFactory.pieceAt(board, from);
+		if (attacker == -1) attacker = PositionFactory.whiteToMove(board) ? 0 : 6; // fallback to pawn if empty (shouldn't happen)
+
+		int victim;
+		if (flags == MoveFactory.FLAG_EN_PASSANT) {
+			victim = PositionFactory.whiteToMove(board) ? 6 : 0; // BP or WP
+		} else {
+			victim = PositionFactory.pieceAt(board, to);
+		}
+
+		boolean isCapture = (flags == MoveFactory.FLAG_EN_PASSANT) || (victim != -1);
+		int score = 0;
+		if (isCapture) {
+			int vicVal = PIECE_VALUES[victim == -1 ? 0 : victim];
+			int attVal = PIECE_VALUES[attacker];
+			// Classic MVV-LVA: prefer higher victim, lower attacker
+			score = (vicVal << 4) - attVal; // multiply victim by 16 for separation
+		}
+
+		if (flags == MoveFactory.FLAG_PROMOTION) {
+			int promo = MoveFactory.GetPromotion(mv);
+			int promVal = PROMO_VALUES[promo & 3];
+			// Strongly prefer promotions over regular captures; add big bonus
+			score += 1_000_000 + promVal;
+		}
+
+		return score;
+	}
+
+	private void scorecaptures(int size) {
+		for (int i = 0; i < size; i++) {
+			scores[i] = scoreCaptureMVVLVA(buffer[i]);
+		}
+	}
+
+	// Reusable selection helper: picks best-scored move in [listIndex, size) and swaps into listIndex
+	private int getnextmove(int[] moves, int[] scores, int size, int listIndex) {
+		int max = Integer.MIN_VALUE;
+		int maxIndex = listIndex;
+		for (int i = listIndex; i < size; i++) {
+			int s = scores[i];
+			if (s > max) { max = s; maxIndex = i; }
+		}
+		int tmpM = moves[maxIndex];
+		moves[maxIndex] = moves[listIndex];
+		moves[listIndex] = tmpM;
+		int tmpS = scores[maxIndex];
+		scores[maxIndex] = scores[listIndex];
+		scores[listIndex] = tmpS;
+		return moves[listIndex];
 	}
 
 	int next() {
@@ -65,9 +117,10 @@ final class MovePicker {
 					if (count == 0) {
 						index = 0;
 						count = gen.generateCaptures(board, buffer, 0);
+						scorecaptures(count);
 					}
 					while (index < count) {
-						int m = buffer[index++];
+						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
