@@ -188,12 +188,11 @@ public final class Search {
 			ttScore = ttEntry.getScore(ply);
 			ttStaticEval = ttEntry.getStaticEval();
 			ttWasPV = ttEntry.wasPV();
-			if (nodeType == NodeType.nonPVNode
-				&& ttScore != TranspositionTable.SCORE_NONE_TT
+            if (nodeType == NodeType.nonPVNode
+                && ttScore != TranspositionTable.SCORE_NONE_TT
                 && ttDepth >= depth + (ttScore >= beta ? 1 : 0)
                 && (isCutNode == (ttScore >= beta))
-				&& canUseScore(ttBound, ttScore, beta)
-				&& pos.halfmoveClock(board) < 90) {
+                && TranspositionTable.boundAllowsThreshold(ttBound, ttScore, beta)) {
 				return ttScore;
 			}
 		}
@@ -347,7 +346,7 @@ public final class Search {
             if (ttStaticEval != TranspositionTable.SCORE_NONE_TT) rawEval = ttStaticEval; else rawEval = evaluate(board);
             standPat = rawEval;
 
-            if (ttHit && ttEntry.getScore(ply) != TranspositionTable.SCORE_NONE_TT && canUseScore(ttEntry.getBound(), ttEntry.getScore(ply), standPat))
+            if (ttHit && ttEntry.getScore(ply) != TranspositionTable.SCORE_NONE_TT && TranspositionTable.boundAllowsThreshold(ttEntry.getBound(), ttEntry.getScore(ply), standPat))
                 standPat = ttEntry.getScore(ply);
 
             if (standPat >= beta) {
@@ -433,11 +432,6 @@ public final class Search {
 		}
 		return false;
 	}
-
-    private static boolean canUseScore(int bound, int score, int operand) {
-        if (score >= operand) return (bound & TranspositionTable.BOUND_LOWER) != 0;
-        return (bound & TranspositionTable.BOUND_UPPER) != 0;
-    }
 
 	private List<Integer> extractPV(int ply) {
 		StackEntry se = stack[ply];

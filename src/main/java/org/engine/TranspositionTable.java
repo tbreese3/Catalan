@@ -60,7 +60,6 @@ public final class TranspositionTable {
         age = 1;
     }
 
-    // Reference-style API: resize, nextSearch, hashfull, probe
     public synchronized void resize(long megaBytes) {
         init(megaBytes);
     }
@@ -72,8 +71,6 @@ public final class TranspositionTable {
     public int hashfull() {
         return getHashfull();
     }
-
-
 
     public int getHashfull() {
         if (bodies == null || numBuckets == 0) return 0;
@@ -117,7 +114,11 @@ public final class TranspositionTable {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
 
-    // Reference-style Entry and probe interface
+    public static boolean boundAllowsThreshold(int bound, int score, int threshold) {
+        if (score >= threshold) return (bound & BOUND_LOWER) != 0;
+        return (bound & BOUND_UPPER) != 0;
+    }
+
     public static final class ProbeResult {
         public final Entry entry;
         public final boolean hit;
@@ -262,7 +263,6 @@ public final class TranspositionTable {
         return new ProbeResult(new Entry(idx), false);
     }
 
-
     private long index(long posKey) {
         long xlo = (int) posKey & 0xFFFFFFFFL;
         long xhi = (posKey >>> 32) & 0xFFFFFFFFL;
@@ -312,5 +312,3 @@ public final class TranspositionTable {
         return Math.max(min, Math.min(max, value));
     }
 }
-
-
