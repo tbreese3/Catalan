@@ -4,10 +4,10 @@ import java.util.Arrays;
 
 public final class TranspositionTable {
 
-    public static final int ENTRIES_PER_BUCKET = 3;
+    public static final int SLOTS_PER_SET = 3;
 
     private static final int ENTRY_SIZE_BYTES = 10;
-    private static final int BUCKET_SIZE_BYTES_NO_PADDING = ENTRIES_PER_BUCKET * ENTRY_SIZE_BYTES; // 30 bytes
+    private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
 
     private static final int MAX_AGE = 1 << 5;
     private static final int AGE_MASK = MAX_AGE - 1;
@@ -20,7 +20,7 @@ public final class TranspositionTable {
     private static final int MATE_VALUE = 32000;
     private static final int MATE_THRESHOLD = 31000;
 
-    public static final short SCORE_NONE_TT = (short) 0x7FFF;
+    public static final short SCORE_VOID = (short) 0x7FFF;
 
     public static final TranspositionTable TT = new TranspositionTable();
 
@@ -40,9 +40,9 @@ public final class TranspositionTable {
         final long ONE_MB = 1024L * 1024L;
         final long hashSize = megaBytes * ONE_MB;
 
-        this.numBuckets = hashSize / BUCKET_SIZE_BYTES_NO_PADDING;
+        this.numBuckets = hashSize / SET_SIZE_BYTES_NO_PADDING;
 
-        long numEntriesLong = this.numBuckets * ENTRIES_PER_BUCKET;
+        long numEntriesLong = this.numBuckets * SLOTS_PER_SET;
         if (numEntriesLong > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Requested TT too large: entries=" + numEntriesLong);
         }
@@ -77,8 +77,8 @@ public final class TranspositionTable {
         int toSample = (int) Math.min(2000L, numBuckets);
         int hit = 0;
         for (int i = 0; i < toSample; i++) {
-            int base = bucketBase(i);
-            for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+            int base = setBase(i);
+            for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
                 int idx = base + slot;
                 short key = keys[idx];
                 if ((key & 0xFFFF) != 0) {
@@ -88,7 +88,7 @@ public final class TranspositionTable {
                 }
             }
         }
-        return hit / (2 * ENTRIES_PER_BUCKET);
+        return hit / (2 * SLOTS_PER_SET);
     }
 
     public void updateTableAge() {
@@ -168,7 +168,7 @@ public final class TranspositionTable {
         public int getScore(int ply) {
             long body = bodies[index];
             int s = decodeScore(body);
-            if (s == SCORE_NONE_TT) return SCORE_NONE_TT;
+            if (s == SCORE_VOID) return SCORE_VOID;
             return scoreFromTT(s, ply);
         }
 
@@ -208,7 +208,7 @@ public final class TranspositionTable {
             boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
 
             int adjScore;
-            if (score == SCORE_NONE_TT) adjScore = score;
+            if (score == SCORE_VOID) adjScore = score;
             else adjScore = scoreToTT(score, ply);
 
             boolean overwrite = (bound == BOUND_EXACT)
@@ -233,12 +233,12 @@ public final class TranspositionTable {
     public ProbeResult probe(long key) {
         if (bodies == null || numBuckets == 0) return new ProbeResult(new Entry(0), false);
         int bucket = (int) index(key);
-        int base = bucketBase(bucket);
+        int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
         int bestSlot = 0;
         int bestMetric = Integer.MAX_VALUE;
 
-        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
             short k = keys[idx];
             if ((k & 0xFFFF) == wantKey) {
@@ -304,8 +304,8 @@ public final class TranspositionTable {
         return (byte) ((body >>> 56) & 0xFFL);
     }
 
-    private static int bucketBase(int bucketIndex) {
-        return bucketIndex * ENTRIES_PER_BUCKET;
+    private static int setBase(int bucketIndex) {
+        return bucketIndex * SLOTS_PER_SET;
     }
 
     private static int clamp(int value, int min, int max) {
