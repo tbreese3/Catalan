@@ -55,6 +55,46 @@ public final class Search {
 		}
 	}
 
+	private static final class TtSnapshot {
+		int bound;
+		int depth;
+		int score;
+		int eval;
+		boolean wasPv;
+
+		static final TtSnapshot NONE;
+		static {
+			TtSnapshot n = new TtSnapshot();
+			n.bound = TranspositionTable.BOUND_NONE;
+			n.depth = -1;
+			n.score = TranspositionTable.SCORE_VOID;
+			n.eval  = TranspositionTable.SCORE_VOID;
+			n.wasPv = false;
+			NONE = n;
+		}
+
+		static TtSnapshot of(TranspositionTable.Entry e, int ply) {
+			TtSnapshot s = new TtSnapshot();
+			s.bound = e.getBound();
+			s.depth = e.getDepth();
+			s.score = e.getScore(ply);
+			s.eval  = e.getStaticEval();
+			s.wasPv = e.wasPV();
+			return s;
+		}
+	}
+
+	private static boolean ttAllowsImmediateCut(NodeType nodeType, boolean cutCandidate, TtSnapshot tt, int nominalDepth, int beta) {
+		if (nodeType != NodeType.nonPVNode) return false;
+		if (tt.score == TranspositionTable.SCORE_VOID) return false;
+		boolean lower = tt.score >= beta;
+		int requiredDepth = nominalDepth + (lower ? 1 : 0);
+		boolean depthOk = tt.depth >= requiredDepth;
+		boolean parityOk = (cutCandidate == lower);
+		boolean boundOk = TranspositionTable.boundAllowsThreshold(tt.bound, tt.score, beta);
+		return depthOk && parityOk && boundOk;
+	}
+
 	private volatile boolean stopRequested = false;
 	private long startTimeMs;
 	private long softStopTimeMs;
@@ -176,22 +216,10 @@ public final class Search {
         TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
         TranspositionTable.Entry entry = pr.entry;
         boolean ttHit = pr.hit;
-        int cachedDepth = -1;
-        int cachedBound = TranspositionTable.BOUND_NONE;
-        int cachedScore = 0;
-        int cachedEval = TranspositionTable.SCORE_VOID;
-        boolean cachedWasPv = false;
+        TtSnapshot snap = ttHit ? TtSnapshot.of(entry, ply) : TtSnapshot.NONE;
         boolean cutCandidate = (nodeType == NodeType.nonPVNode) && (beta == alpha + 1);
-        if (ttHit) {
-            cachedDepth = entry.getDepth();
-            cachedBound = entry.getBound();
-            cachedScore = entry.getScore(ply);
-            cachedEval = entry.getStaticEval();
-            cachedWasPv = entry.wasPV();
-            if (nodeType == NodeType.nonPVNode && cachedScore != TranspositionTable.SCORE_VOID && cachedDepth >= depth + (cachedScore >= beta ? 1 : 0) && (cutCandidate == (cachedScore >= beta)) && TranspositionTable.boundAllowsThreshold(cachedBound, cachedScore, beta)) {
-                return cachedScore;
-			}
-		}
+        if (ttHit && ttAllowsImmediateCut(nodeType, cutCandidate, snap, depth, beta))
+            return snap.score;
 
 		boolean inCheck = pos.isInCheck(board);
 		se.inCheck = inCheck;
@@ -207,10 +235,10 @@ public final class Search {
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
         if (!inCheck) {
-            int rawEval = (ttHit && cachedEval != TranspositionTable.SCORE_VOID) ? cachedEval : evaluate(board);
+            int rawEval = (ttHit && snap.eval != TranspositionTable.SCORE_VOID) ? snap.eval : evaluate(board);
             if (!ttHit) {
                 boolean isPVHere = (nodeType != NodeType.nonPVNode);
-                boolean pvBitEval = isPVHere || cachedWasPv;
+                boolean pvBitEval = isPVHere || snap.wasPv;
                 entry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_VOID, rawEval, pvBitEval, ply);
             }
             se.staticEval = rawEval;
@@ -299,7 +327,7 @@ public final class Search {
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
         int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
         boolean isPV = (nodeType != NodeType.nonPVNode);
-        boolean pvBit = isPV || cachedWasPv;
+        boolean pvBit = isPV || snap.wasPv;
 		entry.store(pos.zobrist(board), resultBound, depth, MoveFactory.intToMove(bestMove), bestScore, rawEval, pvBit, ply);
 
 		return bestScore;
