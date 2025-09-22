@@ -181,45 +181,46 @@ public final class Search {
         int ttScore = 0;
         int ttStaticEval = TranspositionTable.SCORE_NONE_TT;
         boolean ttWasPV = false;
+        boolean isCutNode = (nodeType == NodeType.nonPVNode) && (beta == alpha + 1);
         if (ttHit) {
-            ttDepth = ttEntry.getDepth();
-            ttBound = ttEntry.getBound();
-            ttScore = ttEntry.getScore(ply);
-            ttStaticEval = ttEntry.getStaticEval();
-            ttWasPV = ttEntry.wasPV();
-            if (nodeType == NodeType.nonPVNode && ttDepth >= depth) {
-                if ((ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta)
-                        || (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha)
-                        || (ttBound == TranspositionTable.BOUND_EXACT)) {
-                    return ttScore;
-                }
-            }
-        }
+			ttDepth = ttEntry.getDepth();
+			ttBound = ttEntry.getBound();
+			ttScore = ttEntry.getScore(ply);
+			ttStaticEval = ttEntry.getStaticEval();
+			ttWasPV = ttEntry.wasPV();
+			if (nodeType == NodeType.nonPVNode
+				&& ttScore != TranspositionTable.SCORE_NONE_TT
+                && ttDepth >= depth + (ttScore >= beta ? 1 : 0)
+                && (isCutNode == (ttScore >= beta))
+				&& canUseScore(ttBound, ttScore, beta)
+				&& pos.halfmoveClock(board) < 90) {
+				return ttScore;
+			}
+		}
 
 		boolean inCheck = pos.isInCheck(board);
 		se.inCheck = inCheck;
+		if (inCheck) {
+			se.staticEval = SCORE_NONE;
+		}
 
 		if (depth <= 0) {
 			nodes--;
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
-		// Reset child's killer for this node, like reference sets (ss+1)->KillerMove = Null
 		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
 
-        if (!inCheck && se.staticEval == SCORE_NONE) {
-            int rawEval;
-            if (ttHit && ttStaticEval != TranspositionTable.SCORE_NONE_TT) {
-                rawEval = ttStaticEval;
-            } else {
-                rawEval = evaluate(board);
-                boolean isPV = (nodeType != NodeType.nonPVNode);
-                ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_NONE_TT, rawEval, isPV, ply);
+        if (!inCheck) {
+            int rawEval = (ttHit && ttStaticEval != TranspositionTable.SCORE_NONE_TT) ? ttStaticEval : evaluate(board);
+            if (!ttHit) {
+                boolean isPVHere = (nodeType != NodeType.nonPVNode);
+                boolean pvBitEval = isPVHere || ttWasPV;
+                ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_NONE_TT, rawEval, pvBitEval, ply);
             }
-			se.staticEval = rawEval;
-		}
+            se.staticEval = rawEval;
+        }
 
-		// Null-move pruning
 		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int R = (depth >= 6) ? 3 : 2;
@@ -296,16 +297,17 @@ public final class Search {
 
 		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
 
-		int bound;
-		if (bestScore <= originalAlpha) bound = TranspositionTable.BOUND_UPPER;
-		else if (bestScore >= beta) bound = TranspositionTable.BOUND_LOWER;
-		else bound = TranspositionTable.BOUND_EXACT;
+		int resultBound;
+		if (bestScore >= beta) resultBound = TranspositionTable.BOUND_LOWER;
+		else resultBound = ((nodeType != NodeType.nonPVNode) && (se.pvLength > 0 && !MoveFactory.isNone(se.pv[0])))
+				? TranspositionTable.BOUND_EXACT
+				: TranspositionTable.BOUND_UPPER;
 
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
         int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
         boolean isPV = (nodeType != NodeType.nonPVNode);
-        boolean pvBit = isPV || ttWasPV;
-        ttEntry.store(pos.zobrist(board), bound, depth, MoveFactory.intToMove(bestMove), bestScore, rawEval, pvBit, ply);
+		boolean pvBit = isPV || ttWasPV;
+		ttEntry.store(pos.zobrist(board), resultBound, depth, MoveFactory.intToMove(bestMove), bestScore, rawEval, pvBit, ply);
 
 		return bestScore;
 	}
@@ -322,9 +324,13 @@ public final class Search {
         TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
         TranspositionTable.Entry ttEntry = pr.entry;
         boolean ttHit = pr.hit;
+        int ttStaticEval = TranspositionTable.SCORE_NONE_TT;
+        boolean ttPV = false;
         if (ttHit) {
             int ttBound = ttEntry.getBound();
             int ttScore = ttEntry.getScore(ply);
+            ttStaticEval = ttEntry.getStaticEval();
+            ttPV = ttEntry.wasPV();
             if (nodeType == NodeType.nonPVNode) {
                 if (ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta) return ttScore;
                 if (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha) return ttScore;
@@ -335,17 +341,23 @@ public final class Search {
 		boolean inCheck = pos.isInCheck(board);
 		int originalAlpha = alpha;
 
-		int standPat;
-		if (!inCheck) {
-			int rawEval;
-			if (ttHit) rawEval = TranspositionTable.TT.readEval(bucket, slot); else rawEval = evaluate(board);
-			standPat = rawEval;
-			if (standPat >= beta) return standPat;
-			if (standPat > alpha) alpha = standPat;
-			boolean prevWasPV = ttHit && TranspositionTable.TT.readWasPV(bucket, slot);
-			boolean isPV = (nodeType != NodeType.nonPVNode);
-			TranspositionTable.TT.store(pos.zobrist(board), (short) 0, TranspositionTable.SCORE_NONE_TT, rawEval, TranspositionTable.BOUND_NONE, 0, isPV, isPV || prevWasPV);
-		} else {
+        int standPat;
+        if (!inCheck) {
+            int rawEval;
+            if (ttStaticEval != TranspositionTable.SCORE_NONE_TT) rawEval = ttStaticEval; else rawEval = evaluate(board);
+            standPat = rawEval;
+
+            if (ttHit && ttEntry.getScore(ply) != TranspositionTable.SCORE_NONE_TT && canUseScore(ttEntry.getBound(), ttEntry.getScore(ply), standPat))
+                standPat = ttEntry.getScore(ply);
+
+            if (standPat >= beta) {
+                if (!ttHit) {
+                    ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_NONE_TT, rawEval, ttPV, ply);
+                }
+                return (standPat + beta) / 2;
+            }
+            if (standPat > alpha) alpha = standPat;
+        } else {
 			standPat = -INFTY;
 		}
 
@@ -359,7 +371,7 @@ public final class Search {
 		MovePicker picker = new MovePicker(board, pos, moveGen, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
-		int bestScore = standPat;
+        int bestScore = standPat;
 		for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
 
@@ -401,8 +413,7 @@ public final class Search {
 
         int rawEval = (standPat != -INFTY) ? standPat : 0;
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
-        boolean isPV = (nodeType != NodeType.nonPVNode);
-        ttEntry.store(pos.zobrist(board), bound, 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, isPV, ply);
+        ttEntry.store(pos.zobrist(board), bound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
 
 		return bestScore;
 	}
@@ -422,6 +433,11 @@ public final class Search {
 		}
 		return false;
 	}
+
+    private static boolean canUseScore(int bound, int score, int operand) {
+        if (score >= operand) return (bound & TranspositionTable.BOUND_LOWER) != 0;
+        return (bound & TranspositionTable.BOUND_UPPER) != 0;
+    }
 
 	private List<Integer> extractPV(int ply) {
 		StackEntry se = stack[ply];

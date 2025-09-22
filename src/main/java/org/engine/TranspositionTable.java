@@ -73,9 +73,6 @@ public final class TranspositionTable {
         return getHashfull();
     }
 
-    public void prefetch(long key) {
-        // No-op on Java; left for API parity with reference
-    }
 
     public int probeBucket(long zobristKey) {
         if (bodies == null || numBuckets == 0) return -1;
