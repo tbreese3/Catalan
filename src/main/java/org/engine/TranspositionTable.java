@@ -4,10 +4,10 @@ import java.util.Arrays;
 
 public final class TranspositionTable {
 
-    public static final int ENTRIES_PER_BUCKET = 3;
+    public static final int SLOTS_PER_SET = 3;
 
     private static final int ENTRY_SIZE_BYTES = 10;
-    private static final int BUCKET_SIZE_BYTES_NO_PADDING = ENTRIES_PER_BUCKET * ENTRY_SIZE_BYTES; // 30 bytes
+    private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
 
     private static final int MAX_AGE = 1 << 5;
     private static final int AGE_MASK = MAX_AGE - 1;
@@ -20,7 +20,7 @@ public final class TranspositionTable {
     private static final int MATE_VALUE = 32000;
     private static final int MATE_THRESHOLD = 31000;
 
-    public static final short SCORE_NONE_TT = (short) 0x7FFF;
+    public static final short SCORE_VOID = (short) 0x7FFF;
 
     public static final TranspositionTable TT = new TranspositionTable();
 
@@ -40,9 +40,9 @@ public final class TranspositionTable {
         final long ONE_MB = 1024L * 1024L;
         final long hashSize = megaBytes * ONE_MB;
 
-        this.numBuckets = hashSize / BUCKET_SIZE_BYTES_NO_PADDING;
+        this.numBuckets = hashSize / SET_SIZE_BYTES_NO_PADDING;
 
-        long numEntriesLong = this.numBuckets * ENTRIES_PER_BUCKET;
+        long numEntriesLong = this.numBuckets * SLOTS_PER_SET;
         if (numEntriesLong > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Requested TT too large: entries=" + numEntriesLong);
         }
@@ -60,73 +60,16 @@ public final class TranspositionTable {
         age = 1;
     }
 
-    public int probeBucket(long zobristKey) {
-        if (bodies == null || numBuckets == 0) return -1;
-        return (int) index(zobristKey);
+    public synchronized void resize(long megaBytes) {
+        init(megaBytes);
     }
 
-    public int findSlotInBucket(int bucketIndex, long zobristKey) {
-        if (bodies == null || numBuckets == 0) return -1;
-        int base = bucketBase(bucketIndex);
-        int wantKey = (int) (zobristKey & 0xFFFFL);
-        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
-            int idx = base + slot;
-            short k = keys[idx];
-            if ((k & 0xFFFF) == wantKey) return slot;
-        }
-        return -1;
+    public void nextSearch() {
+        updateTableAge();
     }
 
-    public short readPackedMove(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        long body = bodies[idx];
-        return decodePackedMove(body);
-    }
-
-    public int readScore(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        long body = bodies[idx];
-        return decodeScore(body);
-    }
-
-    public int readEval(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        long body = bodies[idx];
-        return decodeEval(body);
-    }
-
-    public int readDepth(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        long body = bodies[idx];
-        return decodeDepth(body) & 0xFF;
-    }
-
-    public int readAgeBoundPV(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        long body = bodies[idx];
-        return decodeAgeBoundPV(body) & 0xFF;
-    }
-
-    public int readBound(int bucketIndex, int slot) {
-        return boundFromTT(readAgeBoundPV(bucketIndex, slot));
-    }
-
-    public boolean readWasPV(int bucketIndex, int slot) {
-        return formerPV(readAgeBoundPV(bucketIndex, slot));
-    }
-
-    public int readAge(int bucketIndex, int slot) {
-        return ageFromTT(readAgeBoundPV(bucketIndex, slot));
-    }
-
-    public int readKey16(int bucketIndex, int slot) {
-        int idx = bucketBase(bucketIndex) + slot;
-        return keys[idx] & 0xFFFF;
-    }
-
-    public void store(long zobristKey, short packedMove, int score, int eval, int bound, int depth, boolean pvNode, boolean wasPV) {
-        if (numBuckets == 0) return;
-        storeByKey(zobristKey, packedMove, score, eval, bound, depth, pvNode, wasPV);
+    public int hashfull() {
+        return getHashfull();
     }
 
     public int getHashfull() {
@@ -134,8 +77,8 @@ public final class TranspositionTable {
         int toSample = (int) Math.min(2000L, numBuckets);
         int hit = 0;
         for (int i = 0; i < toSample; i++) {
-            int base = bucketBase(i);
-            for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
+            int base = setBase(i);
+            for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
                 int idx = base + slot;
                 short key = keys[idx];
                 if ((key & 0xFFFF) != 0) {
@@ -145,7 +88,7 @@ public final class TranspositionTable {
                 }
             }
         }
-        return hit / (2 * ENTRIES_PER_BUCKET);
+        return hit / (2 * SLOTS_PER_SET);
     }
 
     public void updateTableAge() {
@@ -171,30 +114,144 @@ public final class TranspositionTable {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
 
-    private void storeByKey(long posKey, short move, int score, int eval, int bound, int depth, boolean pvNode, boolean wasPV) {
-        int bucket = (int) index(posKey);
-        int base = bucketBase(bucket);
-        int wantKey = (int) (posKey & 0xFFFFL);
-        byte tableAge = this.age;
+    public static boolean boundAllowsThreshold(int bound, int score, int threshold) {
+        if (score >= threshold) return (bound & BOUND_LOWER) != 0;
+        return (bound & BOUND_UPPER) != 0;
+    }
 
-        int bestSlot = 0;
-        int bestMetric = Integer.MAX_VALUE;
-        boolean found = false;
+    public static final class ProbeResult {
+        public final Entry entry;
+        public final boolean hit;
 
-        for (int slot = 0; slot < ENTRIES_PER_BUCKET; slot++) {
-            int offIdx = base + slot;
-            short key = keys[offIdx];
-            if ((key & 0xFFFF) == wantKey) {
-                bestSlot = slot;
-                found = true;
-                break;
+        private ProbeResult(Entry entry, boolean hit) {
+            this.entry = entry;
+            this.hit = hit;
+        }
+    }
+
+    public final class Entry {
+        private final int index;
+
+        private Entry(int index) {
+            this.index = index;
+        }
+
+        public boolean matches(long key) {
+            return (keys[index] & 0xFFFF) == ((int) key & 0xFFFF);
+        }
+
+        public int getStaticEval() {
+            long body = bodies[index];
+            return decodeEval(body);
+        }
+
+        public int getDepth() {
+            long body = bodies[index];
+            return decodeDepth(body) & 0xFF;
+        }
+
+        public int getBound() {
+            long body = bodies[index];
+            return boundFromTT(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public int getAge() {
+            long body = bodies[index];
+            return ageFromTT(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public short getPackedMove() {
+            long body = bodies[index];
+            return decodePackedMove(body);
+        }
+
+        public int getScore(int ply) {
+            long body = bodies[index];
+            int s = decodeScore(body);
+            if (s == SCORE_VOID) return SCORE_VOID;
+            return scoreFromTT(s, ply);
+        }
+
+        public boolean wasPV() {
+            long body = bodies[index];
+            return formerPV(decodeAgeBoundPV(body) & 0xFF);
+        }
+
+        public boolean isEmpty() {
+            long body = bodies[index];
+            short s = decodeScore(body);
+            byte ab = decodeAgeBoundPV(body);
+            return s == 0 && ab == 0;
+        }
+
+        public int getAgeDistance() {
+            int a = getAge();
+            return (MAX_AGE + (age & 0xFF) - (a & 0xFF)) & AGE_MASK;
+        }
+
+        public void store(long key, int bound, int depth, int move, int score, int eval, boolean isPV, int ply) {
+            long body = bodies[index];
+            short existingKey = keys[index];
+
+            short bodyMove = decodePackedMove(body);
+            short bodyScore = decodeScore(body);
+            short bodyEval = decodeEval(body);
+            byte bodyDepth = decodeDepth(body);
+            byte bodyAbpv = decodeAgeBoundPV(body);
+
+            short newPackedMove = bodyMove;
+            int wantKey = (int) (key & 0xFFFFL);
+            if ((move & 0xFFFF) != 0 || (existingKey & 0xFFFF) != wantKey) {
+                newPackedMove = (short) (move & 0xFFFF);
             }
 
-            long body = bodies[offIdx];
+            boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
+
+            int adjScore;
+            if (score == SCORE_VOID) adjScore = score;
+            else adjScore = scoreToTT(score, ply);
+
+            boolean overwrite = (bound == BOUND_EXACT)
+                    || keyMismatch
+                    || (depth + 5 + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
+                    || (ageFromTT(bodyAbpv & 0xFF) != (age & 0xFF));
+
+            if (overwrite) {
+                bodyDepth = (byte) clamp(depth, 0, 255);
+                boolean persistPV = isPV || ((bodyAbpv & 0xFF) != 0 && formerPV(bodyAbpv & 0xFF));
+                bodyAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
+                bodyScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
+                bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
+            }
+
+            long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
+            bodies[index] = newBody;
+            keys[index] = (short) wantKey;
+        }
+    }
+
+    public ProbeResult probe(long key) {
+        if (bodies == null || numBuckets == 0) return new ProbeResult(new Entry(0), false);
+        int bucket = (int) index(key);
+        int base = setBase(bucket);
+        int wantKey = (int) (key & 0xFFFFL);
+        int bestSlot = 0;
+        int bestMetric = Integer.MAX_VALUE;
+
+        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
+            int idx = base + slot;
+            short k = keys[idx];
+            if ((k & 0xFFFF) == wantKey) {
+                Entry e = new Entry(idx);
+                boolean hit = !e.isEmpty();
+                return new ProbeResult(e, hit);
+            }
+
+            long body = bodies[idx];
             byte abpv = decodeAgeBoundPV(body);
             byte entryDepth = decodeDepth(body);
 
-            int ageDelta = (MAX_AGE + (tableAge & 0xFF) - ageFromTT(abpv & 0xFF)) & AGE_MASK;
+            int ageDelta = (MAX_AGE + (age & 0xFF) - ageFromTT(abpv & 0xFF)) & AGE_MASK;
             int metric = (entryDepth & 0xFF) - ageDelta * 4;
             if (slot == 0 || metric < bestMetric) {
                 bestMetric = metric;
@@ -202,37 +259,8 @@ public final class TranspositionTable {
             }
         }
 
-        int offIdx = base + bestSlot;
-        long body = bodies[offIdx];
-        short existingKey = keys[offIdx];
-
-        short bodyMove = decodePackedMove(body);
-        short bodyScore = decodeScore(body);
-        short bodyEval = decodeEval(body);
-        byte bodyDepth = decodeDepth(body);
-        byte bodyAbpv = decodeAgeBoundPV(body);
-
-        short newPackedMove = bodyMove;
-        if ((move & 0xFFFF) != 0 || (existingKey & 0xFFFF) != wantKey) {
-            newPackedMove = move;
-        }
-
-        boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
-        boolean overwrite = (bound == BOUND_EXACT)
-                || keyMismatch
-                || (depth + 5 + (pvNode ? 2 : 0) > (bodyDepth & 0xFF))
-                || (ageFromTT(bodyAbpv & 0xFF) != (tableAge & 0xFF));
-
-        if (overwrite) {
-            bodyDepth = (byte) clamp(depth, 0, 255);
-            bodyAbpv = (byte) packToTT(bound, wasPV, tableAge & 0xFF);
-            bodyScore = (short) clamp(score, Short.MIN_VALUE, Short.MAX_VALUE);
-            bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
-        }
-
-        long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
-        bodies[offIdx] = newBody;
-        keys[offIdx] = (short) wantKey;
+        int idx = base + bestSlot;
+        return new ProbeResult(new Entry(idx), false);
     }
 
     private long index(long posKey) {
@@ -276,13 +304,11 @@ public final class TranspositionTable {
         return (byte) ((body >>> 56) & 0xFFL);
     }
 
-    private static int bucketBase(int bucketIndex) {
-        return bucketIndex * ENTRIES_PER_BUCKET;
+    private static int setBase(int bucketIndex) {
+        return bucketIndex * SLOTS_PER_SET;
     }
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 }
-
-
