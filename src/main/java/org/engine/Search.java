@@ -12,6 +12,8 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789; // sentinel
+	private static final int ASPIRATION_START = 16;
+	private static final int ASPIRATION_MAX = 512;
 
 	public static final class Limits {
 		public int depth = -1; // fixed depth if > 0, otherwise time-based
@@ -110,33 +112,29 @@ public final class Search {
 			}
 
 
-			final int rootDepth = depth;
-
-			if (depth <= 3) {
+			boolean useAspiration = depth >= 4 && !isMateScore(previousScore);
+			if (!useAspiration) {
 				score = negamax(root, depth, 0, -INFTY, INFTY, NodeType.rootNode);
 			} else {
-				int delta = 12;
+				int delta = ASPIRATION_START;
 				int alpha = Math.max(-INFTY, previousScore - delta);
 				int beta  = Math.min( INFTY, previousScore + delta);
-
-				int searchDepth = depth;
-
 				while (true) {
-					score = negamax(root, searchDepth, 0, alpha, beta, NodeType.rootNode);
+					score = negamax(root, depth, 0, alpha, beta, NodeType.rootNode);
 					if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
-
-					if (score <= alpha) {
+					if (score <= alpha) { // fail-low: widen on the low side
 						beta  = (alpha + beta) / 2;
 						alpha = Math.max(-INFTY, score - delta);
-						searchDepth = rootDepth;
-					} else if (score >= beta) {
+					} else if (score >= beta) { // fail-high: widen on the high side
 						beta = Math.min( INFTY, score + delta);
-						searchDepth = Math.max(searchDepth - 1, 1);
 					} else {
 						break;
 					}
-
-					delta = (int) Math.round(delta * 1.5);
+					delta += (delta / 2) + 2;
+					if (delta > ASPIRATION_MAX) {
+						alpha = -INFTY;
+						beta  =  INFTY;
+					}
 				}
 			}
 
@@ -425,6 +423,11 @@ public final class Search {
 			}
 		}
 		return false;
+	}
+
+	private static boolean isMateScore(int score) {
+		int threshold = MATE_VALUE - 512; // near-mate scores should skip aspiration
+		return score >= threshold || score <= -threshold;
 	}
 
 	private List<Integer> extractPV(int ply) {
