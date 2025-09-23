@@ -37,6 +37,9 @@ public final class PositionFactory {
   public static final long     LIGHT_SQUARES;
   public static final long     DARK_SQUARES;
 
+  // Reusable buffer for pseudo-legal membership checks to avoid allocations
+  private final int[] pseudoBuffer = new int[256];
+
   private static final short[] CR_MASK_LOST_FROM = new short[64];
   private static final short[] CR_MASK_LOST_TO   = new short[64];
   private static final int CR_BITS = (int) CR_MASK;
@@ -597,6 +600,88 @@ public final class PositionFactory {
     return gen.kingAttacked(bb, whiteToMove(bb));
   }
 
+  public boolean hasNonPawnMaterialForSide(long[] bb, boolean white) {
+    if (white) {
+      return (bb[WN] | bb[WB] | bb[WR] | bb[WQ]) != 0L;
+    } else {
+      return (bb[BN] | bb[BB] | bb[BR] | bb[BQ]) != 0L;
+    }
+  }
+
+  public boolean hasNonPawnMaterialForSTM(long[] bb) {
+    return hasNonPawnMaterialForSide(bb, whiteToMove(bb));
+  }
+
+  public void makeNullMoveInPlace(long[] bb) {
+    long h        = bb[HASH];
+    int  metaOld  = (int) bb[META];
+    int  oldCR    = (metaOld & CR_BITS) >>> CR_SHIFT;
+    int  oldEP    = (metaOld & EP_BITS) >>> EP_SHIFT;
+
+    int sp = (int) bb[COOKIE_SP];
+    bb[COOKIE_BASE + sp] =
+            (bb[DIFF_META] & 0xFFFF_FFFFL) << 32 |
+                    (bb[DIFF_INFO] & 0xFFFF_FFFFL);
+    bb[COOKIE_SP] = sp + 1;
+
+    int meta = metaOld;
+
+    int ep = (int) EP_NONE;
+    if (ep != oldEP) {
+      meta = (meta & ~EP_BITS) | (ep << EP_SHIFT);
+      if (oldEP != EP_NONE) h ^= EP_FILE[oldEP & 7];
+    }
+
+    int oldHC = (metaOld & HC_BITS) >>> HC_SHIFT;
+    int newHC = oldHC + 1;
+    if (newHC > 0x7F) newHC = 0x7F;
+    meta = (meta & ~HC_BITS) | (newHC << HC_SHIFT);
+
+    meta ^= STM_MASK;
+    h ^= SIDE_TO_MOVE;
+
+    bb[DIFF_INFO] = 0;
+    bb[DIFF_META] = (int) (bb[META] ^ meta);
+    bb[META]      = meta;
+    bb[HASH]      = h;
+
+    int hsp = (int) bb[HIST_SP];
+    if (hsp < HIST_CAP) {
+      bb[HIST_BASE + hsp] = bb[HASH];
+      bb[HIST_SP] = hsp + 1;
+    }
+  }
+
+  public void undoNullMoveInPlace(long[] bb) {
+    long h          = bb[HASH];
+    int  metaAfter  = (int) bb[META];
+    int  crAfter    = (metaAfter & CR_BITS) >>> CR_SHIFT;
+    int  epAfter    = (metaAfter & EP_BITS) >>> EP_SHIFT;
+
+    bb[META] ^= bb[DIFF_META];
+    int metaBefore = (int) bb[META];
+    int crBefore   = (metaBefore & CR_BITS) >>> CR_SHIFT;
+    int epBefore   = (metaBefore & EP_BITS) >>> EP_SHIFT;
+
+    h ^= SIDE_TO_MOVE;
+    if (crAfter != crBefore) h ^= CASTLING[crAfter] ^ CASTLING[crBefore];
+    if (epAfter != epBefore) {
+      if (epAfter != EP_NONE)  h ^= EP_FILE[epAfter & 7];
+      if (epBefore != EP_NONE) h ^= EP_FILE[epBefore & 7];
+    }
+
+    int sp = (int) bb[COOKIE_SP] - 1;
+    long ck = bb[COOKIE_BASE + sp];
+    bb[COOKIE_SP] = sp;
+    bb[DIFF_INFO] = (int)  ck;
+    bb[DIFF_META] = (int) (ck >>> 32);
+
+    bb[HASH] = h;
+
+    int hsp = (int) bb[HIST_SP];
+    if (hsp > 1) bb[HIST_SP] = hsp - 1;
+  }
+
   private static long packDiff(int from, int to, int cap, int mover, int typ, int pro) {
     return (from) | ((long) to << 6) | ((long) cap << 12) | ((long) mover << 16) | ((long) typ << 20) | ((long) pro << 22);
   }
@@ -623,5 +708,123 @@ public final class PositionFactory {
     if ((bb[BQ] & bit) != 0) return BQ;
     if ((bb[BK] & bit) != 0) return BK;
     return -1;
+  }
+
+  public boolean isPseudoLegalMove(long[] bb, int mv, MoveGenerator gen) {
+    int m = MoveFactory.intToMove(mv);
+    if (MoveFactory.isNone(m)) return false;
+
+    int from = MoveFactory.GetFrom(m);
+    int to = MoveFactory.GetTo(m);
+    if ((from & ~63) != 0 || (to & ~63) != 0 || from == to) return false;
+
+    int mover = pieceAt(bb, from);
+    if (mover == -1) return false;
+    boolean white = mover < 6;
+    if (white != whiteToMove(bb)) return false;
+
+    int flags = MoveFactory.GetFlags(m);
+    int promo = MoveFactory.GetPromotion(m);
+    if (flags < MoveFactory.FLAG_NORMAL || flags > MoveFactory.FLAG_CASTLE) return false;
+
+    int toPiece = pieceAt(bb, to);
+    if (toPiece != -1 && ((toPiece < 6) == white)) return false; // cannot capture own
+
+    int fromRank = from >>> 3, fromFile = from & 7;
+    int toRank = to >>> 3, toFile = to & 7;
+    int dr = toRank - fromRank;
+    int df = toFile - fromFile;
+    int absDf = df < 0 ? -df : df;
+    long occ = bb[WP]|bb[WN]|bb[WB]|bb[WR]|bb[WQ]|bb[WK]|bb[BP]|bb[BN]|bb[BB]|bb[BR]|bb[BQ]|bb[BK];
+    long toBit = 1L << to;
+
+    // Handle special flags explicitly
+    if (flags == MoveFactory.FLAG_CASTLE) {
+      if ((white && mover != WK) || (!white && mover != BK)) return false;
+      if (white) { if (from != 4 || (to != 6 && to != 2)) return false; }
+      else       { if (from != 60 || (to != 62 && to != 58)) return false; }
+      if (toPiece != -1) return false;
+      if (gen == null) gen = new MoveGenerator();
+      return gen.castleLegal(bb, from, to);
+    }
+
+    if (flags == MoveFactory.FLAG_EN_PASSANT) {
+      if (mover != (white ? WP : BP)) return false;
+      int epSq = (int) ((bb[META] & EP_MASK) >>> EP_SHIFT);
+      if (epSq == EP_NONE || epSq != to) return false;
+      if (dr != (white ? 1 : -1) || absDf != 1) return false;
+      int victimSq = white ? (to - 8) : (to + 8);
+      return pieceAt(bb, victimSq) == (white ? BP : WP) && toPiece == -1;
+    }
+
+    if (flags == MoveFactory.FLAG_PROMOTION) {
+      if (mover != (white ? WP : BP)) return false;
+      if (promo < 0 || promo > 3) return false;
+      if (fromRank != (white ? 6 : 1)) return false;
+      if (toRank != (white ? 7 : 0)) return false;
+      if (absDf == 0) {
+        if (dr != (white ? 1 : -1)) return false;
+        if (toPiece != -1) return false;
+        return true;
+      } else if (absDf == 1) {
+        if (dr != (white ? 1 : -1)) return false;
+        if (toPiece == -1) return false;
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    // Normal moves, per piece type
+    switch (mover) {
+      case WP: {
+        if (absDf == 0) {
+          if (dr == 1 && toPiece == -1) return true;
+          if (dr == 2 && fromRank == 1) {
+            int mid = from + 8;
+            if (pieceAt(bb, mid) == -1 && toPiece == -1) return true;
+          }
+          return false;
+        } else if (absDf == 1 && dr == 1) {
+          return toPiece != -1 && toPiece >= 6; // capture
+        }
+        return false;
+      }
+      case BP: {
+        if (absDf == 0) {
+          if (dr == -1 && toPiece == -1) return true;
+          if (dr == -2 && fromRank == 6) {
+            int mid = from - 8;
+            if (pieceAt(bb, mid) == -1 && toPiece == -1) return true;
+          }
+          return false;
+        } else if (absDf == 1 && dr == -1) {
+          return toPiece != -1 && toPiece < 6; // capture
+        }
+        return false;
+      }
+      case WN: case BN: {
+        long mask = MoveGenerator.KNIGHT_ATK[from];
+        return (mask & toBit) != 0L;
+      }
+      case WB: case BB: {
+        long att = MoveGenerator.bishopAtt(occ, from);
+        return (att & toBit) != 0L;
+      }
+      case WR: case BR: {
+        long att = MoveGenerator.rookAtt(occ, from);
+        return (att & toBit) != 0L;
+      }
+      case WQ: case BQ: {
+        long att = MoveGenerator.queenAtt(occ, from);
+        return (att & toBit) != 0L;
+      }
+      case WK: case BK: {
+        long mask = MoveGenerator.KING_ATK[from];
+        return (mask & toBit) != 0L;
+      }
+      default:
+        return false;
+    }
   }
 }

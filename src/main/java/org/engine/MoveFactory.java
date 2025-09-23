@@ -2,10 +2,16 @@ package org.engine;
 
 public final class MoveFactory {
 
-  public static final int FLAG_NORMAL     = 0;
-  public static final int FLAG_PROMOTION  = 1;
-  public static final int FLAG_EN_PASSANT = 2;
-  public static final int FLAG_CASTLE     = 3;
+  public static final int MOVE_NONE      = 0;
+  public static final int FLAG_NORMAL      = 0;
+  public static final int FLAG_PROMOTION   = 1;
+  public static final int FLAG_EN_PASSANT  = 2;
+  public static final int FLAG_CASTLE      = 3;
+
+  public static final int PROMOTION_KNIGHT = 0;
+  public static final int PROMOTION_BISHOP = 1;
+  public static final int PROMOTION_ROOK   = 2;
+  public static final int PROMOTION_QUEEN  = 3;
 
   private MoveFactory() {}
 
@@ -33,6 +39,14 @@ public final class MoveFactory {
     return (mv >>> 14) & 0x3;
   }
 
+  public static int intToMove(int raw) {
+    return raw & 0xFFFF;
+  }
+
+  public static boolean isNone(int mv) {
+    return (mv & 0xFFFF) == 0;
+  }
+
   public static String moveToUci(int mv) {
     int from = GetFrom(mv);
     int to = GetTo(mv);
@@ -43,7 +57,12 @@ public final class MoveFactory {
     char c = (char) ('a' + (to & 7));
     char d = (char) ('1' + (to >>> 3));
     if (flags != FLAG_PROMOTION) return "" + a + b + c + d;
-    char p = switch (promo) { case 0 -> 'n'; case 1 -> 'b'; case 2 -> 'r'; case 3 -> 'q'; default -> 'q'; };
+    char p = switch (promo) {
+      case PROMOTION_KNIGHT -> 'n';
+      case PROMOTION_BISHOP -> 'b';
+      case PROMOTION_ROOK -> 'r';
+      case PROMOTION_QUEEN -> 'q';
+      default -> 'q'; };
     return "" + a + b + c + d + p;
   }
 }

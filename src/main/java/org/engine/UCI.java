@@ -20,7 +20,7 @@ public class UCI {
 
     public static void main(String[] args) throws Exception {
         Eval.initializeEval();
-        TranspositionTable.TT.init(256);
+        TranspositionTable.TT.init(8);
         new UCI().loop();
     }
 
