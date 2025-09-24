@@ -22,7 +22,7 @@ test { useJUnitPlatform() }
 ext {
     appName       = 'Catalan'
     mainClassName = 'org.engine.Main'
-    jreMajor      = '24'
+    jreMajor      = '25'
 
     jreWinZipUrl  = "https://api.adoptium.net/v3/binary/latest/${jreMajor}/ga/windows/x64/jre/hotspot/normal/eclipse"
 
@@ -35,7 +35,7 @@ application {
     applicationDefaultJvmArgs = ['--add-modules', 'jdk.incubator.vector']
 }
 
-java { toolchain { languageVersion = JavaLanguageVersion.of(24) } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 
 // Enable incubator Vector API for compilation and tests
 tasks.withType(JavaCompile).configureEach {
