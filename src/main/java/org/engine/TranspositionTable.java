@@ -210,7 +210,7 @@ public final class TranspositionTable {
 
             boolean overwrite = (bound == BOUND_EXACT)
                     || keyMismatch
-                    || (depth + 5 + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
+                    || (depth + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
                     || (ageFromTT(bodyAbpv & 0xFF) != (age & 0xFF));
 
             if (overwrite) {
