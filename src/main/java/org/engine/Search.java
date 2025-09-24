@@ -91,7 +91,7 @@ public final class Search {
 
 		int previousBest = MoveFactory.MOVE_NONE;
 		int previousScore = 0;
-		int maxDepth = limits.depth > 0 ? limits.depth : 3;
+		int maxDepth = limits.depth > 0 ? limits.depth : MAX_PLY;
 
 		for (int depth = 1; depth <= maxDepth; depth++) {
 			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
