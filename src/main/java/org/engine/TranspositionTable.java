@@ -210,7 +210,7 @@ public final class TranspositionTable {
 
             boolean overwrite = (bound == BOUND_EXACT)
                     || keyMismatch
-                    || (depth + 5 + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
+                    || (depth + 4 + (isPV ? 2 : 0) > (bodyDepth & 0xFF))
                     || (ageFromTT(bodyAbpv & 0xFF) != (age & 0xFF));
 
             if (overwrite) {
@@ -249,7 +249,7 @@ public final class TranspositionTable {
             byte entryDepth = decodeDepth(body);
 
             int ageDelta = (MAX_AGE + (age & 0xFF) - ageFromTT(abpv & 0xFF)) & AGE_MASK;
-            int metric = (entryDepth & 0xFF) - ageDelta * 4;
+            int metric = (entryDepth & 0xFF) - ageDelta * 6;
             if (slot == 0 || metric < bestMetric) {
                 bestMetric = metric;
                 bestSlot = slot;
