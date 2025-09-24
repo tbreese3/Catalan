@@ -91,7 +91,7 @@ public final class Search {
 
 		int previousBest = MoveFactory.MOVE_NONE;
 		int previousScore = 0;
-		int maxDepth = limits.depth > 0 ? limits.depth : 64;
+		int maxDepth = limits.depth > 0 ? limits.depth : 3;
 
 		for (int depth = 1; depth <= maxDepth; depth++) {
 			if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
@@ -110,26 +110,31 @@ public final class Search {
 			}
 
 
-			// Aspiration window similar to top engines: symmetric widening, skip near mates
-			boolean nearMate = Math.abs(previousScore) >= (MATE_VALUE - 2 * MAX_PLY);
-			if (depth <= 3 || nearMate) {
+			final int rootDepth = depth;
+
+			if (depth < 3) {
 				score = negamax(root, depth, 0, -INFTY, INFTY, NodeType.rootNode);
 			} else {
-				int delta = 16 + depth * 2;
-				int center = previousScore;
-				int alpha = Math.max(-INFTY, center - delta);
-				int beta  = Math.min( INFTY, center + delta);
+				int delta = 12;
+				int alpha = Math.max(-INFTY, previousScore - delta);
+				int beta  = Math.min( INFTY, previousScore + delta);
+
+				int searchDepth = depth;
 
 				while (true) {
-					score = negamax(root, depth, 0, alpha, beta, NodeType.rootNode);
+					score = negamax(root, searchDepth, 0, alpha, beta, NodeType.rootNode);
 					if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
 
 					if (score <= alpha) {
-						delta = Math.min(INFTY / 4, delta * 2);
-						alpha = Math.max(-INFTY, center - delta);
+						delta = Math.max(1, delta / 2);
+						alpha = Math.max(-INFTY, score - delta);
+						beta  = Math.min( INFTY, score + delta);
+						searchDepth = rootDepth;
 					} else if (score >= beta) {
-						delta = Math.min(INFTY / 4, delta * 2);
-						beta = Math.min( INFTY, center + delta);
+						delta = Math.max(1, delta / 2);
+						alpha = Math.max(-INFTY, score - delta);
+						beta  = Math.min( INFTY, score + delta);
+						searchDepth = Math.max(searchDepth - 1, 1);
 					} else {
 						break;
 					}
