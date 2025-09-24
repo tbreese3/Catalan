@@ -181,16 +181,18 @@ public final class Search {
         int tableDepth = -1;
         int tableBound = TranspositionTable.BOUND_NONE;
         boolean tableWasPv = false;
-        boolean cutCandidate = (nodeType == NodeType.nonPVNode) && (beta == alpha + 1);
         if (tableHit) {
 			tableScore = entry.getScore(ply);
             tableDepth = entry.getDepth();
             tableBound = entry.getBound();
             tableEval = entry.getStaticEval();
             tableWasPv = entry.wasPV();
-            if (nodeType == NodeType.nonPVNode && tableScore != TranspositionTable.SCORE_VOID && tableDepth >= depth + (tableScore >= beta ? 1 : 0) && (cutCandidate == (tableScore >= beta)) && TranspositionTable.boundAllowsThreshold(tableBound, tableScore, beta)) {
-                return tableScore;
-			}
+            if (nodeType == NodeType.nonPVNode && tableScore != TranspositionTable.SCORE_VOID && tableDepth >= depth) {
+                boolean boundAllows = (tableScore >= beta)
+                        ? ((tableBound & TranspositionTable.BOUND_LOWER) != 0)
+                        : ((tableBound & TranspositionTable.BOUND_UPPER) != 0);
+                if (boundAllows) return tableScore;
+            }
 		}
 
 		boolean inCheck = pos.isInCheck(board);
@@ -292,9 +294,7 @@ public final class Search {
 
 		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
 
-		int resultBound;
-		if (bestScore >= beta) resultBound = TranspositionTable.BOUND_LOWER;
-		else resultBound = ((nodeType != NodeType.nonPVNode) && (se.pvLength > 0 && !MoveFactory.isNone(se.pv[0]))) ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER;
+        int resultBound = bestScore >= beta ? TranspositionTable.BOUND_LOWER : (bestScore > originalAlpha ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER);
 
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
         int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
@@ -324,10 +324,11 @@ public final class Search {
             int ttScore = ttEntry.getScore(ply);
             ttStaticEval = ttEntry.getStaticEval();
             ttPV = ttEntry.wasPV();
-            if (nodeType == NodeType.nonPVNode) {
-                if (ttBound == TranspositionTable.BOUND_LOWER && ttScore >= beta) return ttScore;
-                if (ttBound == TranspositionTable.BOUND_UPPER && ttScore <= alpha) return ttScore;
-                if (ttBound == TranspositionTable.BOUND_EXACT) return ttScore;
+            if (nodeType == NodeType.nonPVNode && ttScore != TranspositionTable.SCORE_VOID) {
+                boolean boundAllows = (ttScore >= beta)
+                        ? ((ttBound & TranspositionTable.BOUND_LOWER) != 0)
+                        : ((ttBound & TranspositionTable.BOUND_UPPER) != 0);
+                if (boundAllows) return ttScore;
             }
         }
 
@@ -340,14 +341,26 @@ public final class Search {
             if (ttStaticEval != TranspositionTable.SCORE_VOID) rawEval = ttStaticEval; else rawEval = evaluate(board);
             standPat = rawEval;
 
-            if (ttHit && ttEntry.getScore(ply) != TranspositionTable.SCORE_VOID && TranspositionTable.boundAllowsThreshold(ttEntry.getBound(), ttEntry.getScore(ply), standPat))
-                standPat = ttEntry.getScore(ply);
+            if (ttHit) {
+                int qttScore = ttEntry.getScore(ply);
+                int qttBound = ttEntry.getBound();
+                if (qttScore != TranspositionTable.SCORE_VOID) {
+                    if (qttBound == TranspositionTable.BOUND_EXACT
+                            || (qttBound == TranspositionTable.BOUND_LOWER && qttScore > standPat)
+                            || (qttBound == TranspositionTable.BOUND_UPPER && qttScore < standPat)) {
+                        standPat = qttScore;
+                    }
+                }
+            }
 
             if (standPat >= beta) {
                 if (!ttHit) {
-                    ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_VOID, rawEval, ttPV, ply);
+                    boolean pvHere = (nodeType != NodeType.nonPVNode) || ttPV;
+                    ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_LOWER, 0, 0, standPat, rawEval, pvHere, ply);
                 }
-                return (standPat + beta) / 2;
+                if (Math.abs(standPat) < MATE_VALUE && Math.abs(beta) < MATE_VALUE)
+                    return (standPat + beta) / 2;
+                return standPat;
             }
             if (standPat > alpha) alpha = standPat;
         } else {
@@ -406,7 +419,8 @@ public final class Search {
 
         int rawEval = (standPat != -INFTY) ? standPat : 0;
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
-        ttEntry.store(pos.zobrist(board), bound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
+        int storeBound = (bestScore >= beta) ? TranspositionTable.BOUND_LOWER : TranspositionTable.BOUND_UPPER;
+        ttEntry.store(pos.zobrist(board), storeBound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
 
 		return bestScore;
 	}
