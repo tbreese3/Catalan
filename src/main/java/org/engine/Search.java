@@ -12,8 +12,9 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789; // sentinel
-	private static final int ASPIRATION_START = 16;
-	private static final int ASPIRATION_MAX = 512;
+	private static final int ASPIRATION_WINDOW_INITIAL = 12;
+	private static final int ASPIRATION_WINDOW_MAX = 2500;
+	private static final double ASPIRATION_DELTA_MULTIPLIER = 1.443;
 
 	public static final class Limits {
 		public int depth = -1; // fixed depth if > 0, otherwise time-based
@@ -33,6 +34,30 @@ public final class Search {
 	public interface InfoHandler {
 		void onInfo(int depth, int seldepth, long nodes, long nps, int hashfull,
 		            int scoreCp, long timeMs, List<Integer> pv);
+	}
+
+	private static final class RootMove {
+		int move;
+		int score;
+		int previousScore;
+		double avgScore;
+		
+		RootMove(int move) {
+			this.move = move;
+			this.score = -INFTY;
+			this.previousScore = -INFTY;
+			this.avgScore = 0;
+		}
+		
+		void updateAverage(int newScore) {
+			previousScore = score;
+			score = newScore;
+			if (previousScore == -INFTY) {
+				avgScore = newScore;
+			} else {
+				avgScore = (2.0 * newScore + avgScore) / 3.0;
+			}
+		}
 	}
 
 	private static final class StackEntry {
@@ -91,6 +116,26 @@ public final class Search {
 
 		Result result = new Result();
 
+		List<RootMove> rootMoves = new ArrayList<>();
+		int[] moveBuf = new int[MAX_MOVES];
+
+		int moveCount;
+		moveCount = moveGen.generateCaptures(root, moveBuf, 0);
+		moveCount = moveGen.generateQuiets(root, moveBuf, moveCount);
+
+		for (int i = 0; i < moveCount; i++) {
+			if (pos.makeMoveInPlace(root, moveBuf[i], moveGen)) {
+				pos.undoMoveInPlace(root);
+				rootMoves.add(new RootMove(moveBuf[i]));
+			}
+		}
+		
+		if (rootMoves.isEmpty()) {
+			result.bestMove = MoveFactory.MOVE_NONE;
+			result.scoreCp = 0;
+			return result;
+		}
+
 		int previousBest = MoveFactory.MOVE_NONE;
 		int previousScore = 0;
 		int maxDepth = limits.depth > 0 ? limits.depth : 64;
@@ -112,28 +157,68 @@ public final class Search {
 			}
 
 
-			boolean useAspiration = depth >= 4 && !isMateScore(previousScore);
+			boolean useAspiration = depth >= 3 && previousScore > -MATE_VALUE / 2 && previousScore < MATE_VALUE / 2;
+			
 			if (!useAspiration) {
 				score = negamax(root, depth, 0, -INFTY, INFTY, NodeType.rootNode);
 			} else {
-				int delta = ASPIRATION_START;
-				int alpha = Math.max(-INFTY, previousScore - delta);
-				int beta  = Math.min( INFTY, previousScore + delta);
+				RootMove bestRootMove = null;
+				for (RootMove rm : rootMoves) {
+					if (rm.move == previousBest) {
+						bestRootMove = rm;
+						break;
+					}
+				}
+				
+				int centerScore = previousScore;
+				if (bestRootMove != null && bestRootMove.previousScore != -INFTY) {
+					centerScore = (int) Math.round(bestRootMove.avgScore);
+				}
+				
+				int delta = ASPIRATION_WINDOW_INITIAL;
+				int scoreMagnitude = Math.abs(centerScore);
+				if (scoreMagnitude > 250) {
+					delta += delta / 4;
+				}
+				if (scoreMagnitude > 500) {
+					delta += delta / 4;
+				}
+				
+				int alpha = Math.max(-INFTY, centerScore - delta);
+				int beta = Math.min(INFTY, centerScore + delta);
+				int failHighCount = 0;
+				int failLowCount = 0;
+				
 				while (true) {
 					score = negamax(root, depth, 0, alpha, beta, NodeType.rootNode);
 					if (stopRequested || System.currentTimeMillis() >= hardStopTimeMs) break;
-					if (score <= alpha) { // fail-low: widen on the low side
-						beta  = (alpha + beta) / 2;
-						alpha = Math.max(-INFTY, score - delta);
-					} else if (score >= beta) { // fail-high: widen on the high side
-						beta = Math.min( INFTY, score + delta);
+					
+					if (score <= alpha) {
+						failLowCount++;
+						beta = (alpha + beta) / 2;
+						alpha = Math.max(-INFTY, alpha - delta);
+
+						if (failLowCount >= 2) {
+							delta = Math.min((int)(delta * 2), ASPIRATION_WINDOW_MAX);
+						}
+					} else if (score >= beta) {
+						failHighCount++;
+						beta = Math.min(INFTY, beta + delta);
+
+						if (failHighCount == 1) {
+							delta = (int)(delta * ASPIRATION_DELTA_MULTIPLIER);
+						} else {
+							delta = Math.min((int)(delta * 2), ASPIRATION_WINDOW_MAX);
+						}
 					} else {
 						break;
 					}
-					delta += (delta / 2) + 2;
-					if (delta > ASPIRATION_MAX) {
+
+					delta = Math.min((int)(delta * ASPIRATION_DELTA_MULTIPLIER), ASPIRATION_WINDOW_MAX);
+
+					if (delta >= ASPIRATION_WINDOW_MAX || (failHighCount + failLowCount) >= 4) {
 						alpha = -INFTY;
-						beta  =  INFTY;
+						beta = INFTY;
 					}
 				}
 			}
@@ -143,6 +228,13 @@ public final class Search {
 			List<Integer> pv = extractPV(0);
 			previousBest = pv.isEmpty() ? MoveFactory.MOVE_NONE : pv.get(0);
 			previousScore = score;
+			
+			for (RootMove rm : rootMoves) {
+				if (rm.move == previousBest) {
+					rm.updateAverage(score);
+					break;
+				}
+			}
 
 			result.bestMove = previousBest;
 			result.scoreCp = score;
