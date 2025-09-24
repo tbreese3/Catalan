@@ -136,7 +136,7 @@ public final class Search {
 						break;
 					}
 
-					delta = (int) Math.round(delta * 1.5);
+					delta += (delta + 1) >> 1;
 				}
 			}
 
