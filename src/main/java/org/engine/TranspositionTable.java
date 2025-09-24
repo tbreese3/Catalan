@@ -114,10 +114,7 @@ public final class TranspositionTable {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
 
-    public static boolean boundAllowsThreshold(int bound, int score, int threshold) {
-        if (score >= threshold) return (bound & BOUND_LOWER) != 0;
-        return (bound & BOUND_UPPER) != 0;
-    }
+    
 
     public static final class ProbeResult {
         public final Entry entry;
