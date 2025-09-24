@@ -10,7 +10,7 @@ public final class PositionFactory {
   final static int DIFF_INFO = 14;
 
   final static int HASH = 15;
-  public static final int MAX_MOVE = 1000;
+  public static final int MAX_MOVE = 6000;
   final static int COOKIE_SP = 16;
   final static int COOKIE_BASE = 17;
   final static int COOKIE_CAP = MAX_MOVE;
