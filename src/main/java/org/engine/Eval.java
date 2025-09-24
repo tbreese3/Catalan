@@ -28,10 +28,10 @@ public final class Eval {
   private static final int COLOR = 384;
   private static final int PIECE = 64;
 
-  private static final short[][] L1_WEIGHTS = new short[INPUT_SIZE][HL_SIZE];
-  private static final short[] L1_BIASES = new short[HL_SIZE];
-  private static final short[][][] L2_WEIGHTS = new short[OUTPUT_BUCKETS][2][HL_SIZE];
-  private static final short[] L2_BIASES = new short[OUTPUT_BUCKETS];
+  private static short[][] L1_WEIGHTS = new short[INPUT_SIZE][HL_SIZE];
+  private static short[] L1_BIASES = new short[HL_SIZE];
+  private static short[][][] L2_WEIGHTS = new short[OUTPUT_BUCKETS][2][HL_SIZE];
+  private static short[] L2_BIASES = new short[OUTPUT_BUCKETS];
 
   private static final VectorSpecies<Short> SHORT_SPECIES = ShortVector.SPECIES_PREFERRED;
   private static final int UPPER_BOUND = SHORT_SPECIES.loopBound(HL_SIZE);
@@ -86,6 +86,180 @@ public final class Eval {
       }
     } catch (IOException e) {
       System.err.println("Failed to open NNUE file");
+    }
+  }
+
+  // ========================= NNUE Online Training Helpers =========================
+
+  private static final double SCALE_L2 = (400.0 / 16320.0) / 255.0; // scale from hidden*W to Cp
+  private static final double SCALE_BIAS2 = (400.0 / 16320.0);       // scale for L2 bias into Cp
+
+  private static short saturateShort(int v) {
+    if (v > Short.MAX_VALUE) return Short.MAX_VALUE;
+    if (v < Short.MIN_VALUE) return Short.MIN_VALUE;
+    return (short) v;
+  }
+
+  /**
+   * Train the network on a single position, adjusting quantized weights directly.
+   * Uses mean squared error gradient with clipping and simple SGD.
+   * lrL2 typically ~1e-4..1e-3, lrL1 typically ~1e-6..1e-4.
+   */
+  public static void trainOnPosition(long[] bb, int targetCp, double lrL1, double lrL2) {
+    // Build fresh accumulators from current weights to avoid stale state
+    NNUEState s = new NNUEState();
+    refreshAccumulator(s, bb);
+
+    boolean whiteToMove = PositionFactory.whiteToMove(bb);
+    int bucket = chooseOutputBucket(bb);
+    short[] stmAcc = whiteToMove ? s.whiteAccumulator[s.currentAccumulator] : s.blackAccumulator[s.currentAccumulator];
+    short[] oppAcc = whiteToMove ? s.blackAccumulator[s.currentAccumulator] : s.whiteAccumulator[s.currentAccumulator];
+    short[] wStm = L2_WEIGHTS[bucket][0];
+    short[] wOpp = L2_WEIGHTS[bucket][1];
+
+    int predCp = evaluate(s, bb);
+    int errorCp = predCp - targetCp; // dLoss/dPred for 0.5*(pred-target)^2
+
+    // Clip the error to stabilize
+    if (errorCp > 2000) errorCp = 2000;
+    else if (errorCp < -2000) errorCp = -2000;
+
+    // Precompute dL/dBias2 in weight space (convert Cp gradient to bias units)
+    // Pred = (sum/255 + b2) * (400/16320) => dPred/db2 = 400/16320
+    double gBias2 = errorCp * SCALE_BIAS2; // gradient in Cp units mapped back
+
+    // Update L2 biases (quantized short)
+    for (int k = 0; k < OUTPUT_BUCKETS; k++) {
+      // Only update the active bucket to keep training targeted
+      if (k != bucket) continue;
+      int b = L2_BIASES[k];
+      // SGD step: w := w - lr * grad  (convert grad to short domain directly)
+      int delta = (int) Math.round(lrL2 * gBias2);
+      // Negative gradient means we should decrease bias when error positive
+      // Using sign convention above, subtract delta from bias
+      b -= delta;
+      L2_BIASES[k] = saturateShort(b);
+    }
+
+    // Prepare grads for L1 accumulators and update L2 weights
+    // dPred/d(wStm[i]) = SCALE_L2 * screlu(stmAcc[i])
+    // dPred/d(stmAcc[i]) = SCALE_L2 * wStm[i] * d(screlu)/dv
+    // same for opp
+    int qa = QA;
+    double[] gAccStm = new double[HL_SIZE];
+    double[] gAccOpp = new double[HL_SIZE];
+
+    for (int i = 0; i < HL_SIZE; i++) {
+      int vStm = stmAcc[i];
+      int vOpp = oppAcc[i];
+
+      int hStm = (vStm <= 0) ? 0 : (vStm >= qa ? qa * qa : vStm * vStm);
+      int hOpp = (vOpp <= 0) ? 0 : (vOpp >= qa ? qa * qa : vOpp * vOpp);
+
+      // L2 weight gradients
+      double gwStm = errorCp * SCALE_L2 * hStm;
+      double gwOpp = errorCp * SCALE_L2 * hOpp;
+
+      // Clip L2 weight gradients
+      if (gwStm > 1e6) gwStm = 1e6; else if (gwStm < -1e6) gwStm = -1e6;
+      if (gwOpp > 1e6) gwOpp = 1e6; else if (gwOpp < -1e6) gwOpp = -1e6;
+
+      int wsi = wStm[i];
+      int woi = wOpp[i];
+      int dWsi = (int) Math.round(lrL2 * gwStm);
+      int dWoi = (int) Math.round(lrL2 * gwOpp);
+      // Apply in the descent direction
+      wsi -= dWsi;
+      woi -= dWoi;
+      wStm[i] = saturateShort(wsi);
+      wOpp[i] = saturateShort(woi);
+
+      // Accumulator gradients for L1
+      int dActStm = (vStm > 0 && vStm < qa) ? (2 * vStm) : 0; // d(screlu)/dv
+      int dActOpp = (vOpp > 0 && vOpp < qa) ? (2 * vOpp) : 0;
+
+      gAccStm[i] = errorCp * SCALE_L2 * (double) wsi * dActStm;
+      gAccOpp[i] = errorCp * SCALE_L2 * (double) woi * dActOpp;
+
+      // Clip L1 accumulator gradients
+      if (gAccStm[i] > 5e6) gAccStm[i] = 5e6; else if (gAccStm[i] < -5e6) gAccStm[i] = -5e6;
+      if (gAccOpp[i] > 5e6) gAccOpp[i] = 5e6; else if (gAccOpp[i] < -5e6) gAccOpp[i] = -5e6;
+    }
+
+    // Update L1 biases: each bias contributes to both accumulators equally
+    for (int i = 0; i < HL_SIZE; i++) {
+      double g = gAccStm[i] + gAccOpp[i];
+      int b = L1_BIASES[i];
+      int step = (int) Math.round(lrL1 * g);
+      b -= step;
+      L1_BIASES[i] = saturateShort(b);
+    }
+
+    // Update L1 weights for all features present on the board
+    // Iterate pieces present and update their index rows for white/black views
+    for (int pc = WP; pc <= BK; ++pc) {
+      long bits = bb[pc];
+      while (bits != 0) {
+        int sq = Long.numberOfTrailingZeros(bits);
+        bits &= bits - 1;
+        int idxW = getIndexWhite(sq, pc);
+        int idxB = getIndexBlack(sq, pc);
+
+        short[] rowW = L1_WEIGHTS[idxW];
+        short[] rowB = L1_WEIGHTS[idxB];
+
+        // Map accumulator grads to view grads
+        // white view feeds whiteAccumulator; black view feeds blackAccumulator
+        // Determine which accumulator corresponds to stm/opp
+        for (int i = 0; i < HL_SIZE; i++) {
+          double gW, gB;
+          if (whiteToMove) {
+            gW = gAccStm[i];
+            gB = gAccOpp[i];
+          } else {
+            gW = gAccOpp[i];
+            gB = gAccStm[i];
+          }
+          int wv = rowW[i];
+          int bv = rowB[i];
+          int dW = (int) Math.round(lrL1 * gW);
+          int dB = (int) Math.round(lrL1 * gB);
+          wv -= dW;
+          bv -= dB;
+          rowW[i] = saturateShort(wv);
+          rowB[i] = saturateShort(bv);
+        }
+      }
+    }
+  }
+
+  public static void saveNetwork(String path) throws IOException {
+    try (java.io.OutputStream os = new java.io.BufferedOutputStream(new java.io.FileOutputStream(path))) {
+      try (java.io.DataOutputStream dos = new java.io.DataOutputStream(os)) {
+        // L1 weights
+        for (int i = 0; i < INPUT_SIZE; i++) {
+          short[] row = L1_WEIGHTS[i];
+          for (int j = 0; j < HL_SIZE; j++) {
+            dos.writeShort(Short.reverseBytes(row[j]));
+          }
+        }
+        // L1 biases
+        for (int i = 0; i < HL_SIZE; i++) {
+          dos.writeShort(Short.reverseBytes(L1_BIASES[i]));
+        }
+        // L2 weights: HL_SIZE STM then HL_SIZE NTM across buckets in file order used on load
+        for (int i = 0; i < HL_SIZE * 2; i++) {
+          for (int k = 0; k < OUTPUT_BUCKETS; k++) {
+            short v = (i < HL_SIZE) ? L2_WEIGHTS[k][0][i] : L2_WEIGHTS[k][1][i - HL_SIZE];
+            dos.writeShort(Short.reverseBytes(v));
+          }
+        }
+        // L2 biases
+        for (int i = 0; i < OUTPUT_BUCKETS; i++) {
+          dos.writeShort(Short.reverseBytes(L2_BIASES[i]));
+        }
+        dos.flush();
+      }
     }
   }
 

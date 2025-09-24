@@ -42,6 +42,8 @@ public class UCI {
                 long[] fresh = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 System.arraycopy(fresh, 0, board, 0, fresh.length);
                 TranspositionTable.TT.clear();
+            } else if (line.startsWith("selfplay")) {
+                handleSelfplay(line);
             } else if (line.startsWith("position")) {
                 handlePosition(line);
             } else if (line.startsWith("go")) {
@@ -230,6 +232,49 @@ public class UCI {
         }, "search-thread");
         searchThread.setDaemon(true);
         searchThread.start();
+    }
+
+    private void handleSelfplay(String cmd) {
+        // Usage: selfplay games N depth D out path lrL1 X lrL2 Y
+        // All options optional; when none provided print usage.
+        int games = -1;
+        int depth = -1;
+        String out = null;
+        double lrL1 = -1;
+        double lrL2 = -1;
+
+        StringTokenizer st = new StringTokenizer(cmd);
+        st.nextToken(); // selfplay
+        boolean any = false;
+        while (st.hasMoreTokens()) {
+            String t = st.nextToken();
+            try {
+                if ("games".equalsIgnoreCase(t) && st.hasMoreTokens()) { games = Integer.parseInt(st.nextToken()); any = true; }
+                else if ("depth".equalsIgnoreCase(t) && st.hasMoreTokens()) { depth = Integer.parseInt(st.nextToken()); any = true; }
+                else if ("out".equalsIgnoreCase(t) && st.hasMoreTokens()) { out = st.nextToken(); any = true; }
+                else if ("lrL1".equalsIgnoreCase(t) && st.hasMoreTokens()) { lrL1 = Double.parseDouble(st.nextToken()); any = true; }
+                else if ("lrL2".equalsIgnoreCase(t) && st.hasMoreTokens()) { lrL2 = Double.parseDouble(st.nextToken()); any = true; }
+            } catch (Exception ignored) {}
+        }
+
+        if (!any) {
+            System.out.println("info string usage: selfplay games N depth D out path lrL1 X lrL2 Y");
+            System.out.println("info string defaults: games=1 depth=6 out=trained-network.bin lrL1=1e-8 lrL2=1e-8");
+            return;
+        }
+
+        long g = games > 0 ? games : 1;
+        int d = depth > 0 ? depth : 6;
+        String o = (out != null && !out.isEmpty()) ? out : "trained-network.bin";
+        double l1 = lrL1 > 0 ? lrL1 : 1e-8;
+        double l2 = lrL2 > 0 ? lrL2 : 1e-8;
+
+        // Block the UCI loop while selfplay runs (single-threaded)
+        try {
+            SelfPlay.run(g, d, o, l1, l2);
+        } catch (Exception e) {
+            System.out.println("info string selfplay error: " + e.getMessage());
+        }
     }
 
     private void stopSearch() {
