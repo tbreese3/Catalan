@@ -3,10 +3,10 @@ package org.engine;
 import java.util.Arrays;
 
 public final class TranspositionTable {
-    public static final int SLOTS_PER_SET = 3;
+    public static final int SLOTS_PER_SET = 4;
 
     private static final int ENTRY_SIZE_BYTES = 10;
-    private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
+    private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 40 bytes
 
     private static final int MAX_AGE = 1 << 5;
     private static final int AGE_MASK = MAX_AGE - 1;
@@ -165,46 +165,52 @@ public final class TranspositionTable {
     }
 
     public void store(int entryIndex, long key, int bound, int depth, int move, int score, int eval, boolean isPV, int ply) {
-        long body = bodies[entryIndex];
         short existingKey = keys[entryIndex];
-
+        int wantKey = (int) (key & 0xFFFFL);
+        boolean keyMatch = (existingKey & 0xFFFF) == wantKey;
+        
+        long body = bodies[entryIndex];
         short bodyMove = decodePackedMove(body);
-        short bodyScore = decodeScore(body);
-        short bodyEval = decodeEval(body);
         byte bodyDepth = decodeDepth(body);
         byte bodyAbpv = decodeAgeBoundPV(body);
-
-        short newPackedMove = bodyMove;
-        int wantKey = (int) (key & 0xFFFFL);
-        if ((move & 0xFFFF) != 0 || (existingKey & 0xFFFF) != wantKey) {
-            newPackedMove = (short) (move & 0xFFFF);
+        
+        // Modern engines always store on key match or empty slot
+        if (!keyMatch) {
+            // Overwriting different position - this is from probe's victim selection
+            bodyMove = 0;
+            bodyDepth = 0;
+            bodyAbpv = 0;
+        }
+        
+        short newPackedMove = (short) (move & 0xFFFF);
+        if (newPackedMove == 0 && keyMatch && bodyMove != 0) {
+            newPackedMove = bodyMove;
         }
 
-        boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
-
-        int adjScore;
-        if (score == SCORE_VOID) adjScore = score;
-        else adjScore = scoreToTT(score, ply);
-
-        boolean isExact = (bound == BOUND_EXACT);
         int existingDepth = bodyDepth & 0xFF;
+        int existingBound = boundFromTT(bodyAbpv & 0xFF);
+        boolean existingPV = formerPV(bodyAbpv & 0xFF);
+        int currentGen = age & 0xFF;
         int existingGen = ageFromTT(bodyAbpv & 0xFF);
-        int genNow = age & 0xFF;
-        boolean refresh = existingGen != genNow;
-        boolean depthImproves = depth + (isPV ? 2 : 0) >= existingDepth - 1;
-        boolean overwrite = keyMismatch || isExact || depthImproves || refresh;
-
-        if (overwrite) {
-            bodyDepth = (byte) clamp(depth, 0, 255);
-            boolean persistPV = isPV || ((bodyAbpv & 0xFF) != 0 && formerPV(bodyAbpv & 0xFF));
-            bodyAbpv = (byte) packToTT(bound, persistPV, genNow);
-            bodyScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
-            bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
+        boolean differentGen = existingGen != currentGen;
+        boolean depthOK = depth + 3 >= existingDepth;
+        boolean exactBound = (bound == BOUND_EXACT);
+        boolean pvChange = isPV != existingPV;
+        
+        if (!keyMatch || differentGen || depthOK || exactBound || pvChange) {
+            // Store the entry
+            byte newDepth = (byte) clamp(depth, 0, 255);
+            boolean newPV = isPV || (keyMatch && existingPV); // Preserve PV flag
+            byte newAbpv = (byte) packToTT(bound, newPV, currentGen);
+            
+            int adjScore = (score == SCORE_VOID) ? score : scoreToTT(score, ply);
+            short newScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
+            short newEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
+            
+            long newBody = encodeBody(newPackedMove, newScore, newEval, newDepth, newAbpv);
+            bodies[entryIndex] = newBody;
+            keys[entryIndex] = (short) wantKey;
         }
-
-        long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
-        bodies[entryIndex] = newBody;
-        keys[entryIndex] = (short) wantKey;
     }
 
     public ProbeResult probe(long key) {
@@ -213,47 +219,65 @@ public final class TranspositionTable {
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        // Modern replacement scheme inspired by top engines
-        // Value function: depth - 8*age, with bonuses for bound type and PV flag
-        int bestIdx = base;
-        int bestValue = Integer.MIN_VALUE;
-
+        // First pass: look for exact key match or empty slot
+        int firstEmpty = -1;
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
             short k = keys[idx];
             
-            // Always return on key match
             if ((k & 0xFFFF) == wantKey) {
-                boolean hit = !isEmpty(idx);
-                return new ProbeResult(idx, hit);
+                // Found matching key - check if valid entry
+                long body = bodies[idx];
+                if (body == 0L) {
+                    // Matching key but empty body - treat as miss
+                    return new ProbeResult(idx, false);
+                }
+                return new ProbeResult(idx, true);
             }
-
-            // Calculate replacement value for this slot
-            long body = bodies[idx];
-            if (body == 0L && k == 0) {
-                // Empty slot has lowest value (will be replaced first)
-                return new ProbeResult(idx, false);
-            }
-
-            byte abpv = decodeAgeBoundPV(body);
-            int entryDepth = decodeDepth(body) & 0xFF;
-            int entryAge = ageFromTT(abpv & 0xFF);
-            int ageDiff = ((age - entryAge) & AGE_MASK);
-            int bound = boundFromTT(abpv & 0xFF);
-            boolean wasPv = formerPV(abpv & 0xFF);
-
-
-            int value = entryDepth - 8 * ageDiff;
-            if (wasPv) value += 1;
-            if (bound == BOUND_EXACT) value += 1;
-
-            if (value < bestValue) {
-                bestValue = value;
-                bestIdx = idx;
+            
+            if (k == 0 && firstEmpty == -1) {
+                firstEmpty = idx;
             }
         }
-
-        return new ProbeResult(bestIdx, false);
+        
+        // No key match found - return empty slot if available
+        if (firstEmpty != -1) {
+            return new ProbeResult(firstEmpty, false);
+        }
+        
+        // Need to select victim for replacement
+        // Modern replacement strategy: minimize value = depth - 8*ageDiff + bonuses
+        int victimIdx = base;
+        int victimValue = Integer.MAX_VALUE;
+        
+        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
+            int idx = base + slot;
+            long body = bodies[idx];
+            
+            byte abpv = decodeAgeBoundPV(body);
+            int entryDepth = decodeDepth(body) & 0xFF;
+            int entryGen = ageFromTT(abpv & 0xFF);
+            int genDiff = ((age - entryGen) & AGE_MASK);
+            int bound = boundFromTT(abpv & 0xFF);
+            boolean wasPv = formerPV(abpv & 0xFF);
+            
+            // Calculate replacement value
+            // Base: depth - 8 * generation_difference
+            // This heavily favors replacing old entries
+            int value = entryDepth - (genDiff << 3);
+            
+            // Small bonuses to preserve valuable entries
+            if (bound == BOUND_EXACT) value += 2;  // Exact bounds are most valuable
+            if (wasPv) value += 1;                 // PV nodes are important
+            
+            // Track minimum value (will be replaced)
+            if (value < victimValue) {
+                victimValue = value;
+                victimIdx = idx;
+            }
+        }
+        
+        return new ProbeResult(victimIdx, false);
     }
 
     private long index(long posKey) {
