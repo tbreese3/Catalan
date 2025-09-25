@@ -66,7 +66,49 @@ public final class Search {
 	private final int[][] moveBuffers = new int[MAX_PLY + 5][MAX_MOVES];
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
-	private final History history = new History();
+
+	// History heuristic (moved from History.java)
+	private static final int HISTORY_SIZE = 2 * 64 * 64;
+	private static final int HISTORY_DECAY_SHIFT = 8;
+	private final int[] history = new int[HISTORY_SIZE];
+
+	private static int historyIndex(boolean white, int move) {
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return (side << 12) | (from << 6) | to;
+	}
+
+	private void clearHistory() {
+		for (int i = 0; i < history.length; i++) history[i] = 0;
+	}
+
+	private int historyScore(boolean white, int move) {
+		return history[historyIndex(white, move)];
+	}
+
+	private void onQuietFailHigh(boolean white, int move, int depth) {
+		int idx = historyIndex(white, move);
+		int bonus = depth * depth;
+		int current = history[idx];
+		current -= (current >> HISTORY_DECAY_SHIFT);
+		current += bonus;
+		history[idx] = current;
+	}
+
+	private static final int LMR_MAX_DEPTH = 64;
+	private static final int LMR_MAX_MOVES = 64;
+	private static final int[][] LMR_TABLE = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
+	static {
+		for (int d = 1; d <= LMR_MAX_DEPTH; d++) {
+			for (int m = 1; m <= LMR_MAX_MOVES; m++) {
+				double r = 0.75 + Math.log(d) * Math.log(m) / 2.25;
+				int ir = (int) r;
+				if (ir < 0) ir = 0;
+				LMR_TABLE[d][m] = ir;
+			}
+		}
+	}
 
 	public void stop() {
 		stopRequested = true;
@@ -87,7 +129,7 @@ public final class Search {
 
 		stack = new StackEntry[MAX_PLY + 5];
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
-		history.clear();
+		clearHistory();
 
 		Result result = new Result();
 
@@ -232,8 +274,8 @@ public final class Search {
 			}
 		}
 
-        int[] moves = moveBuffers[ply];
-        int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
+		int[] moves = moveBuffers[ply];
+		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
 		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
 
@@ -244,17 +286,52 @@ public final class Search {
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
+			int flagsLMR = MoveFactory.GetFlags(move);
+			boolean isEP = (flagsLMR == MoveFactory.FLAG_EN_PASSANT);
+			int toSqLMR = MoveFactory.GetTo(move);
+			int targetPieceLMR = isEP ? (PositionFactory.whiteToMove(board) ? 6 : 0) : PositionFactory.pieceAt(board, toSqLMR);
+			boolean isCaptureLMR = isEP || (targetPieceLMR != -1);
+			boolean isPromotionLMR = (flagsLMR == MoveFactory.FLAG_PROMOTION);
+			boolean isCastleLMR = (flagsLMR == MoveFactory.FLAG_CASTLE);
+			boolean isQuietLMR = !isCaptureLMR && !isPromotionLMR && !isCastleLMR;
+
+			// Late Move Reductions
+			int searchDepthChild = depth - 1;
+			int appliedReduction = 0;
+			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
+			boolean childPv = parentIsPV && i == 0;
+			if (!se.inCheck && !childPv && isQuietLMR && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
+				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
+				int r = LMR_TABLE[dIdx][mIdx];
+
+				boolean whiteSTM = PositionFactory.whiteToMove(board);
+				int hVal = historyScore(whiteSTM, move);
+				if (hVal > 4096) r = Math.max(0, r - 2);
+				else if (hVal > 1024) r = Math.max(0, r - 1);
+
+				if (hVal < -4096) r += 1;
+				if (r > 0) {
+					appliedReduction = Math.min(r, depth - 1);
+					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
+					se.reduction = appliedReduction;
+				}
+			}
+
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
 			int score;
-			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
-			boolean childPv = parentIsPV && i == 0;
 			if (childPv) {
-				score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
+				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
 			} else {
-				score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+				score = -negamax(board, searchDepthChild, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+
+				if (appliedReduction > 0 && score > alpha) {
+					score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+				}
+				
 				if (parentIsPV && score > alpha && score < beta) {
 					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
@@ -291,7 +368,7 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 					// History update on quiet fail-high
 					boolean white = PositionFactory.whiteToMove(board);
-					history.onQuietFailHigh(white, move, Math.max(1, depth));
+					onQuietFailHigh(white, move, Math.max(1, depth));
 				}
 				break;
 			}

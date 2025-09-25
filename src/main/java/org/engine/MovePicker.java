@@ -6,7 +6,7 @@ final class MovePicker {
 	private final MoveGenerator gen;
 	private final int[] buffer;
 	private final int[] scores;
-	private final History history;
+	private final int[] history;
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
@@ -21,7 +21,7 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, History history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
@@ -78,14 +78,19 @@ final class MovePicker {
 		}
 	}
 
+	private static int historyIndex(boolean white, int move) {
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return (side << 12) | (from << 6) | to;
+	}
+
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
-			int score = 0;
-			if (history != null) {
-				score = history.score(white, m);
-			}
+			int idx = historyIndex(white, m);
+			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
 			scores[i] = score;
 		}
 	}
