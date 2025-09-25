@@ -193,14 +193,19 @@ public final class TranspositionTable {
         int currentGen = age & 0xFF;
         int existingGen = ageFromTT(bodyAbpv & 0xFF);
         boolean differentGen = existingGen != currentGen;
-        boolean depthOK = depth + 3 >= existingDepth;
         boolean exactBound = (bound == BOUND_EXACT);
-        boolean pvChange = isPV != existingPV;
+        boolean pvChange = isPV && !existingPV; // only escalate PV, never demote
+        // Replacement conditions: prefer keeping deep, exact, PV and fresh entries
+        boolean depthOK = depth + 2 >= existingDepth || exactBound || pvChange || !keyMatch;
         
-        if (!keyMatch || differentGen || depthOK || exactBound || pvChange) {
+        // Avoid overwriting a deeper EXACT unless we improve it
+        boolean existingIsValuable = (existingBound == BOUND_EXACT) || existingPV;
+        boolean newImprovesValuable = exactBound || (depth > existingDepth + 1) || pvChange;
+
+        if (!keyMatch || differentGen || depthOK || (existingIsValuable && newImprovesValuable)) {
             // Store the entry
             byte newDepth = (byte) clamp(depth, 0, 255);
-            boolean newPV = isPV || (keyMatch && existingPV); // Preserve PV flag
+            boolean newPV = isPV || (keyMatch && existingPV); // Preserve PV when matched
             byte newAbpv = (byte) packToTT(bound, newPV, currentGen);
             
             int adjScore = (score == SCORE_VOID) ? score : scoreToTT(score, ply);
@@ -210,6 +215,11 @@ public final class TranspositionTable {
             long newBody = encodeBody(newPackedMove, newScore, newEval, newDepth, newAbpv);
             bodies[entryIndex] = newBody;
             keys[entryIndex] = (short) wantKey;
+        } else if (keyMatch && !differentGen) {
+            // Refresh generation without changing data to reduce aging evictions
+            byte refreshedAbpv = (byte) packToTT(existingBound, existingPV, currentGen);
+            long refreshedBody = encodeBody(bodyMove, decodeScore(body), decodeEval(body), bodyDepth, refreshedAbpv);
+            bodies[entryIndex] = refreshedBody;
         }
     }
 
@@ -231,6 +241,15 @@ public final class TranspositionTable {
                 if (body == 0L) {
                     // Matching key but empty body - treat as miss
                     return new ProbeResult(idx, false);
+                }
+                // Refresh generation on hit to protect from replacement
+                byte abpv = decodeAgeBoundPV(body);
+                int entryGen = ageFromTT(abpv & 0xFF);
+                int currentGen = age & 0xFF;
+                if (entryGen != currentGen) {
+                    byte newAbpv = (byte) packToTT(boundFromTT(abpv & 0xFF), formerPV(abpv & 0xFF), currentGen);
+                    long newBody = encodeBody(decodePackedMove(body), decodeScore(body), decodeEval(body), decodeDepth(body), newAbpv);
+                    bodies[idx] = newBody;
                 }
                 return new ProbeResult(idx, true);
             }
@@ -265,9 +284,13 @@ public final class TranspositionTable {
             // Base: depth - 8 * generation_difference
             // This heavily favors replacing old entries
             int value = entryDepth - (genDiff << 3);
+            // Strongly prefer evicting entries that only contain static eval (no search score)
+            short s = decodeScore(body);
+            if (s == SCORE_VOID) value -= 16;
             
             // Small bonuses to preserve valuable entries
             if (bound == BOUND_EXACT) value += 2;  // Exact bounds are most valuable
+            if (bound == BOUND_UPPER) value -= 1;  // Upper bounds are less valuable
             if (wasPv) value += 1;                 // PV nodes are important
             
             // Track minimum value (will be replaced)
