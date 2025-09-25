@@ -6,6 +6,7 @@ final class MovePicker {
 	private final MoveGenerator gen;
 	private final int[] buffer;
 	private final int[] scores;
+	private final History history;
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
@@ -20,10 +21,11 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, History history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
+		this.history = history;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
@@ -73,6 +75,18 @@ final class MovePicker {
 	private void scorecaptures(int size) {
 		for (int i = 0; i < size; i++) {
 			scores[i] = scoreCaptureMVVLVA(buffer[i]);
+		}
+	}
+
+	private void scorequiets(int size) {
+		boolean white = PositionFactory.whiteToMove(board);
+		for (int i = 0; i < size; i++) {
+			int m = buffer[i];
+			int score = 0;
+			if (history != null) {
+				score = history.score(white, m);
+			}
+			scores[i] = score;
 		}
 	}
 
@@ -133,9 +147,10 @@ final class MovePicker {
 					if (count == 0) {
 						index = 0;
 						count = gen.generateQuiets(board, buffer, 0);
+						scorequiets(count);
 					}
 					while (index < count) {
-						int m = buffer[index++];
+						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
