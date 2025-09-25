@@ -3,7 +3,9 @@ package org.engine;
 public final class History {
 	private final int[] table = new int[2 * 64 * 64];
 
-	private static final int DECAY_SHIFT = 8; 
+	private static final int GRAVITY = 16384;
+	
+	private static final int MAX_HISTORY = 16384;
 
 	private static int index(boolean white, int from, int to) {
 		int s = white ? 0 : 1;
@@ -20,16 +22,24 @@ public final class History {
 		return table[index(white, from, to)];
 	}
 
-	public void onQuietFailHigh(boolean white, int move, int depth) {
+	public void update(boolean white, int move, int depth, boolean good) {
 		int from = MoveFactory.GetFrom(move);
 		int to = MoveFactory.GetTo(move);
 		int idx = index(white, from, to);
 		int bonus = depth * depth;
+		if (!good) {
+			bonus = -bonus;
+		}
+	
 		int current = table[idx];
-		// Exponential decay: new = old - old/2^k + bonus
-		current -= (current >> DECAY_SHIFT);
-		current += bonus;
+		current += bonus - current * Math.abs(bonus) / GRAVITY;
+		current = Math.max(-MAX_HISTORY, Math.min(MAX_HISTORY, current));
+		
 		table[idx] = current;
+	}
+	
+	public void onQuietFailHigh(boolean white, int move, int depth) {
+		update(white, move, depth, true);
 	}
 }
 
