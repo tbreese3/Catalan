@@ -3,9 +3,7 @@ package org.engine;
 import java.util.Arrays;
 
 public final class TranspositionTable {
-
-    // Use a 4-way set associative design (modern engines commonly use 4-way clusters)
-    public static final int SLOTS_PER_SET = 4;
+    public static final int SLOTS_PER_SET = 3;
 
     private static final int ENTRY_SIZE_BYTES = 10;
     private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
@@ -215,8 +213,13 @@ public final class TranspositionTable {
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        int victimSlot = 0;
-        int victimScore = Integer.MIN_VALUE;
+        int firstEmptyIdx = -1;
+        int oldestIdx = -1;
+        int oldestDelta = -1;
+        int weakIdx = -1; // non-exact, non-PV with minimum depth
+        int weakDepth = Integer.MAX_VALUE;
+        int shallowIdx = base; // overall shallowest depth fallback
+        int shallowDepth = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -226,22 +229,38 @@ public final class TranspositionTable {
                 return new ProbeResult(idx, hit);
             }
 
+            if (isEmpty(idx)) {
+                if (firstEmptyIdx == -1) firstEmptyIdx = idx;
+                continue;
+            }
+
             long body = bodies[idx];
             byte abpv = decodeAgeBoundPV(body);
-            byte entryDepth = decodeDepth(body);
+            int entryDepth = decodeDepth(body) & 0xFF;
             int b = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
-
             int ageDelta = (MAX_AGE + (age & 0xFF) - ageFromTT(abpv & 0xFF)) & AGE_MASK;
-            int score = (ageDelta << 5) - (entryDepth & 0xFF) + ((b == BOUND_EXACT) ? -4 : 0) + (pv ? -2 : 0);
-            if (slot == 0 || score > victimScore) {
-                victimScore = score;
-                victimSlot = slot;
+
+            if (ageDelta >= 2 && ageDelta > oldestDelta) {
+                oldestDelta = ageDelta;
+                oldestIdx = idx;
+            }
+
+            if (b != BOUND_EXACT && !pv && entryDepth < weakDepth) {
+                weakDepth = entryDepth;
+                weakIdx = idx;
+            }
+
+            if (entryDepth < shallowDepth) {
+                shallowDepth = entryDepth;
+                shallowIdx = idx;
             }
         }
 
-        int idx = base + victimSlot;
-        return new ProbeResult(idx, false);
+        if (firstEmptyIdx != -1) return new ProbeResult(firstEmptyIdx, false);
+        if (oldestIdx != -1) return new ProbeResult(oldestIdx, false);
+        if (weakIdx != -1) return new ProbeResult(weakIdx, false);
+        return new ProbeResult(shallowIdx, false);
     }
 
     private long index(long posKey) {
