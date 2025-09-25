@@ -79,12 +79,11 @@ final class MovePicker {
 	}
 
 	private void scorequiets(int size) {
-		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
 			int score = 0;
 			if (history != null) {
-				score = history.score(white, m);
+				score = history.score(board, m);
 			}
 			scores[i] = score;
 		}

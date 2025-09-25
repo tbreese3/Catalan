@@ -290,8 +290,7 @@ public final class Search {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
 					// History update on quiet fail-high
-					boolean white = PositionFactory.whiteToMove(board);
-					history.onQuietFailHigh(white, move, Math.max(1, depth));
+					history.onQuietFailHigh(board, move, Math.max(1, depth));
 				}
 				break;
 			}
