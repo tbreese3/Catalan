@@ -1,35 +1,34 @@
 package org.engine;
 
 public final class History {
-	private final int[] table = new int[2 * 64 * 64];
+	private final int[][][] table = new int[2][64][64];
 
-	private static final int DECAY_SHIFT = 8; 
-
-	private static int index(boolean white, int from, int to) {
-		int s = white ? 0 : 1;
-		return (s << 12) | (from << 6) | to;
-	}
+	private static final int HISTORY_MAX = 1 << 16;
 
 	public void clear() {
-		for (int i = 0; i < table.length; i++) table[i] = 0;
+		for (int s = 0; s < 2; s++)
+			for (int from = 0; from < 64; from++)
+				for (int to = 0; to < 64; to++)
+					table[s][from][to] = 0;
 	}
 
 	public int score(boolean white, int move) {
 		int from = MoveFactory.GetFrom(move);
 		int to = MoveFactory.GetTo(move);
-		return table[index(white, from, to)];
+		int s = white ? 0 : 1;
+		return table[s][from][to];
 	}
 
 	public void onQuietFailHigh(boolean white, int move, int depth) {
 		int from = MoveFactory.GetFrom(move);
 		int to = MoveFactory.GetTo(move);
-		int idx = index(white, from, to);
+		int s = white ? 0 : 1;
 		int bonus = depth * depth;
-		int current = table[idx];
-		// Exponential decay: new = old - old/2^k + bonus
-		current -= (current >> DECAY_SHIFT);
-		current += bonus;
-		table[idx] = current;
+		int current = table[s][from][to];
+		current += bonus - (current * bonus) / HISTORY_MAX;
+		if (current > HISTORY_MAX) current = HISTORY_MAX;
+		if (current < -HISTORY_MAX) current = -HISTORY_MAX;
+		table[s][from][to] = current;
 	}
 }
 
