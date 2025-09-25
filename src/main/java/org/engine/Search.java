@@ -241,8 +241,20 @@ public final class Search {
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
 		int i = 0;
+		int[] triedQuiets = new int[64];
+		int triedQuietCount = 0;
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
+
+			int priorAlpha = alpha;
+			int flagsPre = MoveFactory.GetFlags(move);
+			int toPre = MoveFactory.GetTo(move);
+			int targetPre = PositionFactory.pieceAt(board, toPre);
+			boolean isEpPre = (flagsPre == MoveFactory.FLAG_EN_PASSANT);
+			boolean isCapturePre = isEpPre || (targetPre != -1);
+			boolean isPromotionPre = (flagsPre == MoveFactory.FLAG_PROMOTION);
+			boolean isCastlePre = (flagsPre == MoveFactory.FLAG_CASTLE);
+			boolean isQuietPre = !isCapturePre && !isPromotionPre && !isCastlePre;
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -263,6 +275,10 @@ public final class Search {
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
 
+			if (isQuietPre) {
+				if (triedQuietCount < triedQuiets.length) triedQuiets[triedQuietCount++] = move;
+			}
+
 			if (score > bestScore) {
 				bestScore = score;
 				if (score > alpha) {
@@ -271,27 +287,24 @@ public final class Search {
 					int childLen = stack[ply + 1].pvLength;
 					System.arraycopy(stack[ply + 1].pv, 0, se.pv, 1, childLen);
 					se.pvLength = childLen + 1;
+					if (isQuietPre && score > priorAlpha && score < beta) {
+						int piece = PositionFactory.pieceAt(board, MoveFactory.GetFrom(move));
+						if (piece != -1) history.onQuietImprove(piece, move, Math.max(1, depth));
+					}
 				}
 			}
 
 			if (alpha >= beta) {
-				int flags = MoveFactory.GetFlags(move);
-				boolean isCapture;
-				if (flags == MoveFactory.FLAG_EN_PASSANT) {
-					isCapture = true;
-				} else {
-					int to = MoveFactory.GetTo(move);
-					int targetPiece = PositionFactory.pieceAt(board, to);
-					isCapture = targetPiece != -1;
-				}
-				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
-				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
+				int flags = flagsPre;
+				boolean isPromotion = isPromotionPre;
+				boolean isCastle = isCastlePre;
+				boolean isCapture = isCapturePre;
 				if (!isCapture && !isPromotion && !isCastle) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
 					// History update on quiet fail-high
-					boolean white = PositionFactory.whiteToMove(board);
-					history.onQuietFailHigh(white, move, Math.max(1, depth));
+					int piece = PositionFactory.pieceAt(board, MoveFactory.GetFrom(move));
+					if (piece != -1) history.onQuietFailHigh(piece, move, Math.max(1, depth));
 				}
 				break;
 			}
@@ -299,9 +312,27 @@ public final class Search {
 
 		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
 
-        int resultBound = bestScore >= beta ? TranspositionTable.BOUND_LOWER : (bestScore > originalAlpha ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER);
+		int resultBound = bestScore >= beta ? TranspositionTable.BOUND_LOWER : (bestScore > originalAlpha ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER);
 
-        int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
+		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
+		// Penalize quiet moves that failed low at this node (no cutoff and no alpha improvement beyond original)
+		if (bestScore < beta) {
+			boolean bestIsQuiet = false;
+			if (!MoveFactory.isNone(bestMove)) {
+				int bf = MoveFactory.GetFlags(bestMove);
+				boolean bIsEp = (bf == MoveFactory.FLAG_EN_PASSANT);
+				boolean bIsCapture = bIsEp || (PositionFactory.pieceAt(board, MoveFactory.GetTo(bestMove)) != -1);
+				boolean bIsPromotion = (bf == MoveFactory.FLAG_PROMOTION);
+				boolean bIsCastle = (bf == MoveFactory.FLAG_CASTLE);
+				bestIsQuiet = !bIsCapture && !bIsPromotion && !bIsCastle;
+			}
+			for (int qi = 0; qi < triedQuietCount; qi++) {
+				int q = triedQuiets[qi];
+				if (bestIsQuiet && q == bestMove) continue;
+				int piece = PositionFactory.pieceAt(board, MoveFactory.GetFrom(q));
+				if (piece != -1) history.onQuietFailLow(piece, q, Math.max(1, depth));
+			}
+		}
         int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
         boolean isPV = (nodeType != NodeType.nonPVNode);
         boolean pvBit = isPV || tableWasPv;

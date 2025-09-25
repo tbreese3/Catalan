@@ -79,14 +79,16 @@ final class MovePicker {
 	}
 
 	private void scorequiets(int size) {
-		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
+			int from = MoveFactory.GetFrom(m);
+			int piece = PositionFactory.pieceAt(board, from);
 			int score = 0;
-			if (history != null) {
-				score = history.score(white, m);
+			if (history != null && piece != -1) {
+				score = history.score(piece, m);
 			}
-			scores[i] = score;
+			// small base to prefer earlier moves when history ties
+			scores[i] = score + i;
 		}
 	}
 
