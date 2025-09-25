@@ -45,7 +45,6 @@ public final class SelfPlay {
 
             if (countLegal(board, mg, pf) == 0) { g--; continue; }
 
-            // Preliminary search to filter openings with too large score
             {
                 Search.Limits pre = new Search.Limits();
                 int d = (depthLimit > 0 ? depthLimit : DEPTH_LIMIT_DEFAULT);
@@ -61,18 +60,15 @@ public final class SelfPlay {
             int updatedInGame = 0;
 
             while (plies < 512) {
-                // If no legal moves or draw, end game
                 if (pf.isDraw(board)) break;
                 int legal = countLegal(board, mg, pf);
                 if (legal == 0) break;
 
-                // Get search score as target (keep side-to-move perspective to match Eval.evaluate)
                 Search.Limits limits = new Search.Limits();
                 limits.depth = (depthLimit > 0) ? depthLimit : DEPTH_LIMIT_DEFAULT;
                 Search.Result res = search.search(board, limits, null);
                 int target = res.scoreCp;
 
-                // Filtering like the reference: skip in-check, captures/EP, and very large evals
                 boolean inCheck = pf.isInCheck(board);
                 int best = res.bestMove;
                 if (best == 0) best = mg.getFirstLegalMove(board);
@@ -90,15 +86,11 @@ public final class SelfPlay {
                     updatedInGame++;
                 }
 
-                // Play the best move found by search; fallback to first legal
-                // Play move (already computed above)
                 int bestMove = best;
                 if (bestMove == 0) bestMove = mg.getFirstLegalMove(board);
 
-                // Make move
                 boolean ok = pf.makeMoveInPlace(board, bestMove, mg);
                 if (!ok) {
-                    // extremely rare due to any mismatch; pick any legal
                     bestMove = mg.getFirstLegalMove(board);
                     if (bestMove == 0) break;
                     pf.makeMoveInPlace(board, bestMove, mg);
@@ -108,7 +100,6 @@ public final class SelfPlay {
                 totalPositions++;
                 sinceLastReport++;
 
-                // Adjudication: if advantage sustained for long enough, end game
                 if (Math.abs(target) >= ADJUDICATE_SCORE) {
                     adjudicationCounter++;
                     if (adjudicationCounter > ADJUDICATE_MOVES) {
@@ -129,14 +120,12 @@ public final class SelfPlay {
                             " updated/s " + (long) pps);
                 }
 
-                // Stop if we've collected enough datapoints for this game
                 if (updatedInGame >= WRITABLE_DATA_LIMIT - 1) {
                     break;
                 }
             }
         }
 
-        // Save the updated quantized network
         Eval.saveNetwork(outPath);
         System.out.println("info string [selfplay] Wrote trained network to " + outPath);
     }
