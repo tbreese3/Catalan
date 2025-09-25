@@ -17,8 +17,7 @@ public final class SelfPlay {
     private static final int MAX_FILTERING_SCORE = 6000;
     private static final int MAX_OPENING_SCORE = 1200;
 
-    public static void run(long gamesToRun, int depthLimit, String outPath,
-                           double lrL1, double lrL2) throws IOException {
+    public static void run(long gamesToRun, int depthLimit, String outPath, double lrL1, double lrL2) throws IOException {
         PositionFactory pf = new PositionFactory();
         MoveGenerator mg = new MoveGenerator();
         Search search = new Search();
@@ -67,16 +66,11 @@ public final class SelfPlay {
                 int legal = countLegal(board, mg, pf);
                 if (legal == 0) break;
 
-                // Evaluate current position with raw NN
-                int evalNoSearch = evaluateRaw(board);
-
-                // Get search score as target
+                // Get search score as target (keep side-to-move perspective to match Eval.evaluate)
                 Search.Limits limits = new Search.Limits();
                 limits.depth = (depthLimit > 0) ? depthLimit : DEPTH_LIMIT_DEFAULT;
                 Search.Result res = search.search(board, limits, null);
                 int target = res.scoreCp;
-                // Normalize to white's perspective (match reference normalization)
-                if (!PositionFactory.whiteToMove(board)) target = -target;
 
                 // Filtering like the reference: skip in-check, captures/EP, and very large evals
                 boolean inCheck = pf.isInCheck(board);
