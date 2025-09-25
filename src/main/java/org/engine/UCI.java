@@ -42,6 +42,7 @@ public class UCI {
                 long[] fresh = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 System.arraycopy(fresh, 0, board, 0, fresh.length);
                 TranspositionTable.TT.clear();
+                search.clearHistory();
             } else if (line.startsWith("position")) {
                 handlePosition(line);
             } else if (line.startsWith("go")) {

@@ -71,6 +71,10 @@ public final class Search {
 	public void stop() {
 		stopRequested = true;
 	}
+	
+	public void clearHistory() {
+		history.clear();
+	}
 
 	public Result search(long[] root, Limits limits, InfoHandler infoHandler) {
 		stopRequested = false;
