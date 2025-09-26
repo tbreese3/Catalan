@@ -205,14 +205,17 @@ public final class TranspositionTable {
         int newDepth = clamp(depth, 0, 255);
 
 
-        int existingDom = (existingDepth << 2) + (formerPV(curAbpv & 0xFF) ? 2 : 0);
-        int incomingDom = (newDepth << 2) + (isPV ? 3 : 0);
-        boolean overwrite = emptySlot
+        boolean overwrite = (bound == BOUND_EXACT)
                 || keyMismatch
                 || (entryAge != (age & 0xFF))
-                || (bound == BOUND_EXACT);
+                || emptySlot;
+
         if (!overwrite) {
-            overwrite = incomingDom > (existingDom + 5);
+            int existingBand = existingDepth / 4;
+            int newBand = newDepth / 4;
+            boolean pvBeats = isPV && !formerPV(curAbpv & 0xFF);
+            if (newBand > existingBand) overwrite = true;
+            else if (newBand == existingBand && pvBeats) overwrite = true;
         }
 
         if (overwrite) {
@@ -240,7 +243,8 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestScore = Integer.MIN_VALUE; 
+        int olderIdx = -1;
+        int olderMinDepth = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -260,9 +264,29 @@ public final class TranspositionTable {
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
 
-            int score = (ageDelta << 2) - (entryDepth & 0xFF);
-            if (slot == 0 || score > bestScore) {
-                bestScore = score;
+            if (ageDelta >= 4 && entryDepth < olderMinDepth) {
+                olderMinDepth = entryDepth;
+                olderIdx = slot;
+            }
+        }
+        if (olderIdx != -1) {
+            return new ProbeResult(base + olderIdx, false);
+        }
+
+        int bestCost = Integer.MAX_VALUE;
+        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
+            int idx = base + slot;
+            long body = bodies[idx];
+            byte abpv = decodeAgeBoundPV(body);
+            int entryDepth = decodeDepth(body) & 0xFF;
+            int bound = boundFromTT(abpv & 0xFF);
+            boolean pv = formerPV(abpv & 0xFF);
+
+            int cost = entryDepth;
+            if (pv) cost += 2;
+            if (bound == BOUND_EXACT) cost += 8;
+            if (slot == 0 || cost < bestCost) {
+                bestCost = cost;
                 bestSlot = slot;
             }
         }
