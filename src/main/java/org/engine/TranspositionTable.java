@@ -207,16 +207,13 @@ public final class TranspositionTable {
         int curAge = (age & 0xFF);
 
         boolean replace;
-        if (emptySlot || keyMismatch) {
-            replace = true;
-        } else if (entryAge != curAge) {
+        if (emptySlot || keyMismatch || entryAge != curAge) {
+            // Misses and stale entries are always replaced
             replace = true;
         } else if (bound == BOUND_EXACT) {
-            // Only overwrite with EXACT if at least equal depth
-            replace = newDepth >= existingDepth;
+            replace = newDepth + 1 >= existingDepth;
         } else if (existingBound == BOUND_EXACT) {
-            // Protect existing EXACT unless we are significantly deeper
-            replace = newDepth >= existingDepth + 3;
+            replace = newDepth >= existingDepth + 2;
         } else {
             replace = (newDepth > existingDepth) || (newDepth == existingDepth && isPV && !existingPv);
         }
@@ -269,13 +266,16 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int aged = ageDelta > 12 ? 12 : ageDelta; // clamp age impact
-            int ageWeight = aged * aged * 12;
-            int depthWeight = entryDepth * entryDepth * 2;
-            int boundPenalty;
-            if (bound == BOUND_EXACT) boundPenalty = 2200; else if (bound == BOUND_LOWER) boundPenalty = 350; else if (bound == BOUND_UPPER) boundPenalty = 200; else boundPenalty = 0;
-            int pvPenalty = pv ? 800 : 0;
-            int score = ageWeight - depthWeight - boundPenalty - pvPenalty;
+            // Compute a value for the entry; the smallest value is the preferred victim
+            int boundWeight = (bound == BOUND_EXACT) ? 2048 : (bound == BOUND_LOWER ? 384 : (bound == BOUND_UPPER ? 192 : 0));
+            int pvWeight = pv ? 768 : 0;
+            int value = (entryDepth << 7) + boundWeight + pvWeight - (ageDelta << 9);
+            // Add a tiny salt to avoid deterministic thrashing under collisions
+            int salt = (((int)(key) ^ (int)(key >>> 32) ^ (slot * 0x9E3779B1)) & 31) - 16;
+            value += salt;
+
+            // Translate to replaceScore by negating (we want minimal value)
+            int score = -value;
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
