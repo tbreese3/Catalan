@@ -202,25 +202,20 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        int existingBound = boundFromTT(curAbpv & 0xFF);
-        boolean existingPv = formerPV(curAbpv & 0xFF);
-        int curAge = (age & 0xFF);
 
-        boolean replace;
-        if (emptySlot || keyMismatch || entryAge != curAge) {
-            // Misses and stale entries are always replaced
-            replace = true;
-        } else if (bound == BOUND_EXACT) {
-            replace = newDepth + 1 >= existingDepth;
-        } else if (existingBound == BOUND_EXACT) {
-            replace = newDepth >= existingDepth + 2;
-        } else {
-            replace = (newDepth > existingDepth) || (newDepth == existingDepth && isPV && !existingPv);
-        }
+        // Divergent but equivalent: quality-oriented acceptance instead of slack comparison
+        final int[] BOUND_SCORE = { 0, 16, 12, 64 }; // NONE, LOWER, UPPER, EXACT
+        int currentQuality = (existingDepth << 6) + BOUND_SCORE[boundFromTT(curAbpv & 0xFF)] + (formerPV(curAbpv & 0xFF) ? 3 : 0);
+        int incomingQuality = (newDepth << 6) + BOUND_SCORE[bound] + (isPV ? 3 : 0);
+
+        boolean replace = keyMismatch
+                || emptySlot
+                || (entryAge != (age & 0xFF))
+                || (incomingQuality >= currentQuality);
 
         if (replace) {
-            boolean stickPV = isPV || (!keyMismatch && entryAge == curAge && formerPV(curAbpv & 0xFF));
-            byte newAbpv = (byte) packToTT(bound, stickPV, age & 0xFF);
+            boolean persistPV = isPV || ((curAbpv & 0xFF) != 0 && formerPV(curAbpv & 0xFF));
+            byte newAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
             long newBody = encodeBody(
                     newPackedMove,
                     (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE),
@@ -266,16 +261,12 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Compute a value for the entry; the smallest value is the preferred victim
-            int boundWeight = (bound == BOUND_EXACT) ? 2048 : (bound == BOUND_LOWER ? 384 : (bound == BOUND_UPPER ? 192 : 0));
-            int pvWeight = pv ? 768 : 0;
-            int value = (entryDepth << 7) + boundWeight + pvWeight - (ageDelta << 9);
-            // Add a tiny salt to avoid deterministic thrashing under collisions
-            int salt = (((int)(key) ^ (int)(key >>> 32) ^ (slot * 0x9E3779B1)) & 31) - 16;
-            value += salt;
-
-            // Translate to replaceScore by negating (we want minimal value)
-            int score = -value;
+            // Divergent but equivalent: triangular age score and quadratic depth penalty
+            int ageScore = ((ageDelta * (ageDelta + 1)) >> 1) << 5; // ~ age^2/2 * 32
+            int depthPenalty = entryDepth * entryDepth;             // depth^2
+            int exactPenalty = (bound == BOUND_EXACT ? 96 : 0);
+            int pvPenalty = pv ? 24 : 0;
+            int score = ageScore - depthPenalty - exactPenalty - pvPenalty;
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
