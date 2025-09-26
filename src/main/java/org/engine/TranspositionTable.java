@@ -200,11 +200,14 @@ public final class TranspositionTable {
         int entryAge = ageFromTT(bodyAbpv & 0xFF);
         boolean entryIsCurrentGen = entryAge == (age & 0xFF);
         boolean oldPV = formerPV(bodyAbpv & 0xFF);
+        int oldBound = boundFromTT(bodyAbpv & 0xFF);
 
         boolean replace = keyMismatch
                 || (bound == BOUND_EXACT)
+                || (depth > existingDepth)
                 || (!entryIsCurrentGen && depth >= existingDepth)
-                || (depth > existingDepth);
+                || (isPV && !oldPV)
+                || (!keyMismatch && oldBound < bound);
 
         if (replace) {
             bodyDepth = (byte) clamp(depth, 0, 255);
@@ -238,6 +241,7 @@ public final class TranspositionTable {
         int candSlot = 0;
         int candAgeDelta = 0;
         int candDepth = 0;
+        int candBound = BOUND_NONE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -257,24 +261,28 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int depth = decodeDepth(body) & 0xFF;
+            int bound = boundFromTT(abpv & 0xFF);
 
             if (!hasCandidate) {
                 hasCandidate = true;
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
+                candBound = bound;
                 continue;
             }
 
             boolean better = false;
-            if (ageDelta > candAgeDelta) better = true;
-            else if (ageDelta == candAgeDelta && depth < candDepth) better = true;
-            else if (ageDelta == candAgeDelta && depth == candDepth && slot < candSlot) better = true;
+            if (depth < candDepth) better = true; // prefer shallower
+            else if (depth == candDepth && ageDelta > candAgeDelta) better = true; // then staler
+            else if (depth == candDepth && ageDelta == candAgeDelta && bound != BOUND_EXACT && candBound == BOUND_EXACT) better = true; // avoid evicting exact
+            else if (depth == candDepth && ageDelta == candAgeDelta && bound == candBound && slot < candSlot) better = true; // stable tie
 
             if (better) {
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
+                candBound = bound;
             }
         }
 
