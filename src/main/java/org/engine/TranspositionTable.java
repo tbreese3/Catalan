@@ -113,9 +113,7 @@ public final class TranspositionTable {
     public static int packToTT(int bound, boolean wasPV, int age) {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
-
     
-
     public static final class ProbeResult {
         public final int index;
         public final boolean hit;
@@ -205,17 +203,26 @@ public final class TranspositionTable {
         int newDepth = clamp(depth, 0, 255);
 
 
-        boolean overwrite = (bound == BOUND_EXACT)
-                || keyMismatch
-                || (entryAge != (age & 0xFF))
-                || emptySlot;
-
+        boolean overwrite = keyMismatch || emptySlot;
         if (!overwrite) {
-            int existingBand = existingDepth / 4;
-            int newBand = newDepth / 4;
-            boolean pvBeats = isPV && !formerPV(curAbpv & 0xFF);
-            if (newBand > existingBand) overwrite = true;
-            else if (newBand == existingBand && pvBeats) overwrite = true;
+            int storedBound = boundFromTT(curAbpv & 0xFF);
+            boolean storedPv = formerPV(curAbpv & 0xFF);
+
+            int currentDepthTerm = existingDepth * existingDepth;
+            int incomingDepthTerm = newDepth * newDepth;
+
+            int currentAgePenalty = ageDelta * (ageDelta + 5);
+            int stalePenalty = (entryAge != (age & 0xFF)) ? 300 : 0;
+            int storedPvGuard = storedPv ? 6 : 0;
+            int storedExactGuard = (storedBound == BOUND_EXACT) ? 120 : 0;
+            int currentQuality = currentDepthTerm + storedPvGuard + storedExactGuard - currentAgePenalty - stalePenalty;
+
+            int incomingPvBoost = isPV ? 6 : 0;
+            int incomingBoundBoost;
+            if (bound == BOUND_EXACT) incomingBoundBoost = 400; else if (bound == BOUND_LOWER) incomingBoundBoost = 40; else if (bound == BOUND_UPPER) incomingBoundBoost = 20; else incomingBoundBoost = 0;
+            int incomingQuality = incomingDepthTerm + incomingPvBoost + incomingBoundBoost;
+
+            overwrite = incomingQuality >= (currentQuality + 8);
         }
 
         if (overwrite) {
@@ -243,8 +250,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int olderIdx = -1;
-        int olderMinDepth = Integer.MAX_VALUE;
+        int bestCost = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -263,28 +269,15 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
-
-            if (ageDelta >= 4 && entryDepth < olderMinDepth) {
-                olderMinDepth = entryDepth;
-                olderIdx = slot;
-            }
-        }
-        if (olderIdx != -1) {
-            return new ProbeResult(base + olderIdx, false);
-        }
-
-        int bestCost = Integer.MAX_VALUE;
-        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
-            int idx = base + slot;
-            long body = bodies[idx];
-            byte abpv = decodeAgeBoundPV(body);
-            int entryDepth = decodeDepth(body) & 0xFF;
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int cost = entryDepth;
-            if (pv) cost += 2;
-            if (bound == BOUND_EXACT) cost += 8;
+            int ageCredit = ageDelta * 100;
+            int pvCost = pv ? 50 : 0;
+            int boundCost;
+            if (bound == BOUND_EXACT) boundCost = 200; else if (bound == BOUND_LOWER) boundCost = 30; else if (bound == BOUND_UPPER) boundCost = 15; else boundCost = 0;
+            int cost = (entryDepth * entryDepth) + pvCost + boundCost - ageCredit;
+
             if (slot == 0 || cost < bestCost) {
                 bestCost = cost;
                 bestSlot = slot;
