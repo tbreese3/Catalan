@@ -202,32 +202,32 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Dynamic tiered overwrite: collisions/empty/exact/gen-change OR depth lead meets tiered margin
+        // Decayed-score overwrite: collisions/empty/exact/gen-change OR incoming composite score beats decayed existing
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
-            int existingBound = boundFromTT(curAbpv & 0xFF);
-            boolean existingPv = formerPV(curAbpv & 0xFF);
+            int existBound = boundFromTT(curAbpv & 0xFF);
+            boolean existPv = formerPV(curAbpv & 0xFF);
 
-            int tierSpan = Math.max(1, MAX_AGE / 8);
-            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3
+            // Derived weights from table parameters (no original magic numbers)
+            int depthW = SLOTS_PER_SET + 2;
+            int boundW = SLOTS_PER_SET;
+            int pvW = Math.max(1, SLOTS_PER_SET - 1);
 
-            int requiredLead = (SLOTS_PER_SET + 1);
-            if (isPV) requiredLead -= 1;
-            if (ageTier >= 2) requiredLead -= 1;
-            if (requiredLead < 0) requiredLead = 0;
+            int existBoundRank = (existBound == BOUND_EXACT) ? 3 : (existBound == BOUND_LOWER) ? 2 : (existBound == BOUND_UPPER) ? 1 : 0;
+            int incBoundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int lead = newDepth - existingDepth;
-            if (lead >= requiredLead) overwrite = true;
-            else if (lead >= 0) {
-                int incomingBoundPrio = (bound == BOUND_EXACT) ? 3
-                        : (bound == BOUND_LOWER) ? 2
-                        : (bound == BOUND_UPPER) ? 1 : 0;
-                int existBoundPrio = (existingBound == BOUND_EXACT) ? 3
-                        : (existingBound == BOUND_LOWER) ? 2
-                        : (existingBound == BOUND_UPPER) ? 1 : 0;
-                if (incomingBoundPrio > existBoundPrio) overwrite = true;
-                else if (incomingBoundPrio == existBoundPrio && isPV && !existingPv) overwrite = true;
-            }
+            int existScore = (existingDepth * depthW)
+                    + (existBoundRank * boundW)
+                    + (existPv ? pvW : 0);
+            int incScore = (newDepth * depthW)
+                    + (incBoundRank * boundW)
+                    + (isPV ? pvW : 0);
+
+            int freshFactor = Math.max(1, (MAX_AGE - ageDelta));
+            long existValue = (long) existScore * (long) freshFactor;
+            long incValue = (long) incScore * (long) MAX_AGE; // current write is always freshest
+
+            overwrite = incValue >= existValue;
         }
 
         if (overwrite) {
@@ -255,7 +255,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestCode = Integer.MAX_VALUE;
+        int bestEvict = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -277,23 +277,21 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int tierSpan = Math.max(1, MAX_AGE / 8);
-            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3 (older -> higher tier)
+            // Derived-weight evict score (smaller is more replaceable)
+            int depthW = SLOTS_PER_SET + 2;
+            int pvPen = SLOTS_PER_SET; // protect PV
+            int boundPen = SLOTS_PER_SET + (SLOTS_PER_SET / 2); // protect stronger bounds a bit more
+            int ageCred = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2)); // reward older entries
+
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int W1 = SLOTS_PER_SET * 64; // age tier weight
-            int W2 = SLOTS_PER_SET * 8;  // bound weight
-            int W3 = SLOTS_PER_SET * 4;  // PV weight
+            int evict = (entryDepth * depthW)
+                    + (pv ? pvPen : 0)
+                    + (boundRank * boundPen)
+                    - (ageDelta * ageCred);
 
-            int agePenalty = ageTier * W1;                         // older (higher tier) -> larger penalty? invert to reward
-            int ageCode = (3 - ageTier) * W1;                      // reward older (smaller code)
-            int boundCode = (3 - boundRank) * W2;                  // reward stronger bound
-            int pvCode = (!pv ? W3 : 0);                           // reward PV
-
-            int code = ageCode + boundCode + pvCode + (entryDepth & 0xFF);
-
-            if (slot == 0 || code < bestCode) {
-                bestCode = code;
+            if (slot == 0 || evict < bestEvict) {
+                bestEvict = evict;
                 bestSlot = slot;
             }
         }
