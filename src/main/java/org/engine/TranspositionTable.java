@@ -224,7 +224,7 @@ public final class TranspositionTable {
             int freshness = Math.max(1, (MAX_AGE - ageDelta));
             int ageRoot = Math.max(1, (int) Math.sqrt(freshness));
 
-            int bucketHash = (int) (index(key) ^ (index >>> 32));
+            int bucketHash = (int) (index(key) ^ (key >>> 32));
             int saltMask = (SLOTS_PER_SET << 1) | 1;
             int salt = ((bucketHash ^ index) & saltMask) - (saltMask >> 1);
 
@@ -286,7 +286,7 @@ public final class TranspositionTable {
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
             int ageTri = (ageDelta * (ageDelta + 1)) / 2;
 
-            int bucketHash = (int) (index(key) ^ (index >>> 32) ^ base ^ slot);
+            int bucketHash = (int) (index(key) ^ (key >>> 32) ^ base ^ slot);
             int salt = bucketHash & ((SLOTS_PER_SET << 1) | 1);
 
             int evict = (entryDepth * entryDepth * depthW)
