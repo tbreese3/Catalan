@@ -181,45 +181,53 @@ public final class TranspositionTable {
         long body = bodies[index];
         short existingKey = keys[index];
 
-        short bodyMove = decodePackedMove(body);
-        short bodyScore = decodeScore(body);
-        short bodyEval = decodeEval(body);
-        byte bodyDepth = decodeDepth(body);
-        byte bodyAbpv = decodeAgeBoundPV(body);
+        short curMove = decodePackedMove(body);
+        short curScore = decodeScore(body);
+        short curEval = decodeEval(body);
+        byte curDepth = decodeDepth(body);
+        byte curAbpv = decodeAgeBoundPV(body);
 
         int wantKey = (int) (key & 0xFFFFL);
         boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
+        boolean emptySlot = isBodyEmpty(body) || (existingKey & 0xFFFF) == 0;
 
-        // Prefer provided move; preserve existing move only when updating same key with move==0
+        // Move handling: top engines typically keep existing move if none provided
         short newPackedMove = (short) (move & 0xFFFF);
-        if (!keyMismatch && newPackedMove == 0) newPackedMove = bodyMove;
+        if (newPackedMove == 0) newPackedMove = curMove;
 
         int adjScore = (score == SCORE_VOID) ? SCORE_VOID : scoreToTT(score, ply);
 
-        // New replacement policy: replace if different key, exact bound, different generation,
-        // or new depth is sufficiently competitive
-        int entryAge = ageFromTT(bodyAbpv & 0xFF);
-        int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
-        int existingDepth = bodyDepth & 0xFF;
-        int depthMargin = (isPV ? 2 : 0) + (ageDelta >= 3 ? 2 : 0);
+        int entryAge = ageFromTT(curAbpv & 0xFF);
+        int existingDepth = curDepth & 0xFF;
+        int newDepth = clamp(depth, 0, 255);
+
+        // Stockfish-like replacement rule:
+        // - Always replace on key mismatch (collision)
+        // - Replace if Exact bound (strong info)
+        // - Replace if different generation (keep table fresh)
+        // - Replace if new depth is competitive (>= oldDepth - 2), with small PV bias
+        int depthSlack = 2 - (isPV ? 1 : 0); // PV entries are a bit more lenient
         boolean replace = keyMismatch
+                || emptySlot
                 || (bound == BOUND_EXACT)
                 || (entryAge != (age & 0xFF))
-                || ((depth + depthMargin) >= existingDepth);
+                || (newDepth >= Math.max(0, existingDepth - depthSlack));
 
         if (replace) {
-            bodyDepth = (byte) clamp(depth, 0, 255);
-            boolean persistPV = isPV || ((bodyAbpv & 0xFF) != 0 && formerPV(bodyAbpv & 0xFF));
-            bodyAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
-            bodyScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
-            bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
-
-            long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
+            boolean persistPV = isPV || ((curAbpv & 0xFF) != 0 && formerPV(curAbpv & 0xFF));
+            byte newAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
+            long newBody = encodeBody(
+                    newPackedMove,
+                    (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE),
+                    (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE),
+                    (byte) newDepth,
+                    newAbpv
+            );
             bodies[index] = newBody;
             keys[index] = (short) wantKey;
-        } else if (!keyMismatch && newPackedMove != bodyMove) {
-            // Same position but not replacing fully: refresh move only
-            long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
+        } else if (!keyMismatch && (move & 0xFFFF) != 0 && newPackedMove != curMove) {
+            // Same position but not replacing fully: refresh best move only
+            long newBody = encodeBody(newPackedMove, curScore, curEval, curDepth, curAbpv);
             bodies[index] = newBody;
         }
     }
@@ -253,8 +261,8 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Replacement heuristic: prefer replacing older, shallow, non-exact, non-PV entries
-            int score = (ageDelta << 10) - (entryDepth << 2) - (bound == BOUND_EXACT ? 64 : 0) - (pv ? 16 : 0);
+            // Replacement heuristic similar to top engines: favor replacing older, shallow, non-exact, non-PV entries
+            int score = (ageDelta << 10) - (entryDepth << 4) - (bound == BOUND_EXACT ? 128 : 0) - (pv ? 32 : 0);
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
