@@ -204,13 +204,18 @@ public final class TranspositionTable {
 
 
         // Divergent but equivalent: quality-oriented acceptance instead of slack comparison
-        final int[] BOUND_SCORE = { 0, 16, 12, 64 }; // NONE, LOWER, UPPER, EXACT
-        int currentQuality = (existingDepth << 6) + BOUND_SCORE[boundFromTT(curAbpv & 0xFF)] + (formerPV(curAbpv & 0xFF) ? 3 : 0);
-        int incomingQuality = (newDepth << 6) + BOUND_SCORE[bound] + (isPV ? 3 : 0);
+        final int[] BOUND_SCORE = { 0, 24, 12, 128 }; // NONE, LOWER, UPPER, EXACT
+        int oldBoundIdx = boundFromTT(curAbpv & 0xFF);
+        boolean oldPv = formerPV(curAbpv & 0xFF);
+        int oldMoveBonus = (curMove & 0xFFFF) != 0 ? 1 : 0;
+        int newMoveBonus = (newPackedMove & 0xFFFF) != 0 ? 1 : 0;
+        int currentQuality = (existingDepth << 6) + BOUND_SCORE[oldBoundIdx] + (oldPv ? 3 : 0) + oldMoveBonus;
+        int incomingQuality = (newDepth << 6) + BOUND_SCORE[bound] + (isPV ? 3 : 0) + newMoveBonus;
 
         boolean replace = keyMismatch
                 || emptySlot
                 || (entryAge != (age & 0xFF))
+                || (BOUND_SCORE[bound] >= 128) // accept EXACT always
                 || (incomingQuality >= currentQuality);
 
         if (replace) {
@@ -261,12 +266,14 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Divergent but equivalent: triangular age score and quadratic depth penalty
-            int ageScore = ((ageDelta * (ageDelta + 1)) >> 1) << 5; // ~ age^2/2 * 32
-            int depthPenalty = entryDepth * entryDepth;             // depth^2
-            int exactPenalty = (bound == BOUND_EXACT ? 96 : 0);
-            int pvPenalty = pv ? 24 : 0;
-            int score = ageScore - depthPenalty - exactPenalty - pvPenalty;
+            // Divergent but equivalent: combined quadratic-linear age and depth scales
+            int ageTerm = ((ageDelta * ageDelta) + ageDelta) << 9;               // ~ (age^2 + age) * 512
+            int depthTerm = ((entryDepth * entryDepth) + entryDepth) << 5;       // ~ (depth^2 + depth) * 32
+            int exactPenalty = (bound == BOUND_EXACT ? (3 << 9) : 0);            // 1536
+            int lowerPenalty = (bound == BOUND_LOWER ? (3 << 7) : 0);            // 384
+            int upperPenalty = (bound == BOUND_UPPER ? (1 << 7) : 0);            // 128
+            int pvPenalty = pv ? (1 << 8) : 0;                                   // 256
+            int score = ageTerm - depthTerm - exactPenalty - lowerPenalty - upperPenalty - pvPenalty;
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
