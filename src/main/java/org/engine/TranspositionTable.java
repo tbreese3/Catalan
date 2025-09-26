@@ -275,7 +275,11 @@ public final class TranspositionTable {
                 else priority = 4;
             }
 
-            if (priority < bestPriority || (priority == bestPriority && entryDepth < bestDepthTie)) {
+            int ageDelta = (MAX_AGE + (age & 0xFF) - (entryAge & 0xFF)) & AGE_MASK;
+
+            if (priority < bestPriority
+                    || (priority == bestPriority && (ageDelta > ((MAX_AGE + (age & 0xFF) - (ageFromTT(decodeAgeBoundPV(bodies[base + victimSlot]) & 0xFF) & 0xFF)) & AGE_MASK)))
+                    || (priority == bestPriority && ageDelta == ((MAX_AGE + (age & 0xFF) - (ageFromTT(decodeAgeBoundPV(bodies[base + victimSlot]) & 0xFF) & 0xFF)) & AGE_MASK) && entryDepth < bestDepthTie)) {
                 bestPriority = priority;
                 bestDepthTie = entryDepth;
                 victimSlot = slot;
