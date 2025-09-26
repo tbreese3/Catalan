@@ -202,33 +202,37 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Simple linear overwrite: compare derived-weight scores (no rotations)
+        // Votes-threshold overwrite (derived weights, simple)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
             int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3, older -> higher
+            int ageTier = Math.min(4, ageDelta / tierSpan); // 0..4
 
             int rankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
             int rankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int depthW = SLOTS_PER_SET + 1;
-            int boundW = SLOTS_PER_SET;
-            int pvW = Math.max(1, SLOTS_PER_SET - 1);
-            int ageW = SLOTS_PER_SET; // higher ageTier reduces stickiness
+            int votes = 0;
 
-            int existingScore = (existingDepth * depthW)
-                    + (rankExisting * boundW)
-                    + (existingPv ? pvW : 0)
-                    - (ageTier * ageW);
+            // Depth lead with derived margin
+            int baseLead = Math.max(1, (SLOTS_PER_SET + (MAX_AGE / (SLOTS_PER_SET + 4))) / 3);
+            if (isPV) baseLead = Math.max(0, baseLead - 1);
+            if (ageTier >= 2) baseLead = Math.max(0, baseLead - 1);
+            if ((newDepth - existingDepth) >= baseLead) votes++;
 
-            int incomingScore = (newDepth * depthW)
-                    + (rankIncoming * boundW)
-                    + (isPV ? pvW : 0);
+            // Bound improvement
+            if (rankIncoming > rankExisting) votes++;
 
-            overwrite = incomingScore >= existingScore;
+            // PV advantage
+            if (isPV && !existingPv) votes++;
+
+            // Existing staleness
+            if (ageTier >= 2) votes++;
+
+            int needed = Math.max(2, SLOTS_PER_SET - 1); // require at least this many wins
+            overwrite = votes >= needed;
         }
 
         if (overwrite) {
@@ -256,7 +260,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestPriority = Integer.MIN_VALUE;
+        int bestCost = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -278,23 +282,25 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
+            // Banded single-pass cost (smaller is more replaceable)
             int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / tierSpan);
+            int ageBand = Math.min(4, ageDelta / tierSpan); // 0..4
+            int depthBand = entryDepth / Math.max(1, 64 / (SLOTS_PER_SET + 1)); // coarse bucket
 
-            int W_age = SLOTS_PER_SET + 1;
-            int W_depth = SLOTS_PER_SET + 1;
+            int W_age = (SLOTS_PER_SET + 1) * 3; // reward older
+            int W_depth = (SLOTS_PER_SET + 2) * 2; // penalize deeper
             int W_pv = Math.max(1, SLOTS_PER_SET - 1);
-            int W_bound = SLOTS_PER_SET;
+            int W_bound = SLOTS_PER_SET; // penalize stronger bounds
 
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int priority = (ageTier * W_age)
-                    - (entryDepth * W_depth)
-                    - (pv ? W_pv : 0)
-                    - (boundRank * W_bound);
+            int cost = (depthBand * W_depth)
+                    + (pv ? W_pv : 0)
+                    + (boundRank * W_bound)
+                    - (ageBand * W_age);
 
-            if (slot == 0 || priority > bestPriority) {
-                bestPriority = priority;
+            if (slot == 0 || cost < bestCost) {
+                bestCost = cost;
                 bestSlot = slot;
             }
         }
