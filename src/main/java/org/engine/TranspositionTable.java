@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 public final class TranspositionTable {
 
-    public static final int SLOTS_PER_SET = 3;
+    public static final int SLOTS_PER_SET = 4; // modern 4-way set associativity
 
     private static final int ENTRY_SIZE_BYTES = 10;
     private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
@@ -114,6 +114,8 @@ public final class TranspositionTable {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
 
+    
+
     public static final class ProbeResult {
         public final int index;
         public final boolean hit;
@@ -179,58 +181,51 @@ public final class TranspositionTable {
         long body = bodies[index];
         short existingKey = keys[index];
 
-        short curMove = decodePackedMove(body);
-        short curScore = decodeScore(body);
-        short curEval = decodeEval(body);
-        byte curDepth = decodeDepth(body);
-        byte curAbpv = decodeAgeBoundPV(body);
+        short bodyMove = decodePackedMove(body);
+        short bodyScore = decodeScore(body);
+        short bodyEval = decodeEval(body);
+        byte bodyDepth = decodeDepth(body);
+        byte bodyAbpv = decodeAgeBoundPV(body);
 
         int wantKey = (int) (key & 0xFFFFL);
         boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
-        boolean emptySlot = isBodyEmpty(body) || (existingKey & 0xFFFF) == 0;
 
-        // Move handling: keep existing unless a move is provided or key changes
-        short newPackedMove = curMove;
-        if (((move & 0xFFFF) != 0) || keyMismatch) {
-            newPackedMove = (short) (move & 0xFFFF);
-        }
+        // Move policy: keep provided move if any; otherwise preserve existing when same key
+        short newPackedMove = (short) (move & 0xFFFF);
+        if (!keyMismatch && newPackedMove == 0) newPackedMove = bodyMove;
 
         int adjScore = (score == SCORE_VOID) ? SCORE_VOID : scoreToTT(score, ply);
 
-        int entryAge = ageFromTT(curAbpv & 0xFF);
-        int newDepth = clamp(depth, 0, 255);
-        int existingDepth = curDepth & 0xFF;
+        int existingDepth = bodyDepth & 0xFF;
+        int entryAge = ageFromTT(bodyAbpv & 0xFF);
+        boolean entryIsCurrentGen = entryAge == (age & 0xFF);
+        boolean oldPV = formerPV(bodyAbpv & 0xFF);
 
-        // Rule-based overwrite: EXACT/key/gen-change OR PV/equal-depth, else deeper wins (protect existing PV/EXACT)
-        boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
-        if (!overwrite) {
-            int existingBound = boundFromTT(curAbpv & 0xFF);
-            boolean existingPv = formerPV(curAbpv & 0xFF);
+        boolean replace = keyMismatch
+                || (bound == BOUND_EXACT)
+                || (isPV && !oldPV)
+                || (!entryIsCurrentGen && depth >= existingDepth)
+                || (depth > existingDepth);
 
-            if (isPV) {
-                overwrite = newDepth >= existingDepth;
-            } else if (existingPv || existingBound == BOUND_EXACT) {
-                overwrite = newDepth > existingDepth;
-            } else {
-                overwrite = newDepth >= existingDepth;
-            }
-        }
+        if (replace) {
+            bodyDepth = (byte) clamp(depth, 0, 255);
+            boolean persistPV = isPV || oldPV;
+            bodyAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
+            bodyScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
+            bodyEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
 
-        if (overwrite) {
-            boolean persistPV = isPV || ((curAbpv & 0xFF) != 0 && formerPV(curAbpv & 0xFF));
-            byte newAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
-            long newBody = encodeBody(
-                    newPackedMove,
-                    (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE),
-                    (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE),
-                    (byte) newDepth,
-                    newAbpv
-            );
+            long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, bodyAbpv);
             bodies[index] = newBody;
             keys[index] = (short) wantKey;
-        } else if (!keyMismatch && newPackedMove != curMove) {
-            long newBody = encodeBody(newPackedMove, curScore, curEval, curDepth, curAbpv);
-            bodies[index] = newBody;
+        } else if (!keyMismatch) {
+            // Soft refresh: same key, keep data, but update generation and move if changed
+            int b = boundFromTT(bodyAbpv & 0xFF);
+            boolean pvPersist = oldPV || isPV;
+            byte newAbpv = (byte) packToTT(b, pvPersist, age & 0xFF);
+            if (newAbpv != bodyAbpv || newPackedMove != bodyMove) {
+                long newBody = encodeBody(newPackedMove, bodyScore, bodyEval, bodyDepth, newAbpv);
+                bodies[index] = newBody;
+            }
         }
     }
 
@@ -240,12 +235,16 @@ public final class TranspositionTable {
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        int victimSlot = 0;
-        int bestPriority = Integer.MAX_VALUE;
-        int bestDepthTie = Integer.MAX_VALUE;
+        boolean hasCandidate = false;
+        int candSlot = 0;
+        int candAgeDelta = 0;
+        int candDepth = 0;
+        boolean candPV = false;
+        int candBound = BOUND_NONE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
+
             if ((keys[idx] & 0xFFFF) == wantKey) {
                 long body = bodies[idx];
                 boolean hit = !isBodyEmpty(body);
@@ -254,39 +253,43 @@ public final class TranspositionTable {
 
             long body = bodies[idx];
             if (isBodyEmpty(body)) {
-                return new ProbeResult(idx, false);
+                return new ProbeResult(idx, false); // empty slot wins immediately
             }
 
             byte abpv = decodeAgeBoundPV(body);
             int entryAge = ageFromTT(abpv & 0xFF);
-            int entryDepth = decodeDepth(body) & 0xFF;
-            int bound = boundFromTT(abpv & 0xFF);
+            int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
+            int depth = decodeDepth(body) & 0xFF;
             boolean pv = formerPV(abpv & 0xFF);
+            int bound = boundFromTT(abpv & 0xFF);
 
-            boolean stale = entryAge != (age & 0xFF);
-            boolean exact = (bound == BOUND_EXACT);
-
-            int priority;
-            if (stale) {
-                priority = (!pv && !exact) ? 0 : 1;
-            } else {
-                if (!pv && !exact) priority = 2;
-                else if (!exact) priority = 3;
-                else priority = 4;
+            if (!hasCandidate) {
+                hasCandidate = true;
+                candSlot = slot;
+                candAgeDelta = ageDelta;
+                candDepth = depth;
+                candPV = pv;
+                candBound = bound;
+                continue;
             }
 
-            int ageDelta = (MAX_AGE + (age & 0xFF) - (entryAge & 0xFF)) & AGE_MASK;
+            boolean better = false;
+            if (ageDelta > candAgeDelta) better = true;
+            else if (ageDelta == candAgeDelta && depth < candDepth) better = true;
+            else if (ageDelta == candAgeDelta && depth == candDepth && !pv && candPV) better = true;
+            else if (ageDelta == candAgeDelta && depth == candDepth && pv == candPV && bound != BOUND_EXACT && candBound == BOUND_EXACT) better = true;
+            else if (ageDelta == candAgeDelta && depth == candDepth && pv == candPV && bound == candBound && slot < candSlot) better = true;
 
-            if (priority < bestPriority
-                    || (priority == bestPriority && (ageDelta > ((MAX_AGE + (age & 0xFF) - (ageFromTT(decodeAgeBoundPV(bodies[base + victimSlot]) & 0xFF) & 0xFF)) & AGE_MASK)))
-                    || (priority == bestPriority && ageDelta == ((MAX_AGE + (age & 0xFF) - (ageFromTT(decodeAgeBoundPV(bodies[base + victimSlot]) & 0xFF) & 0xFF)) & AGE_MASK) && entryDepth < bestDepthTie)) {
-                bestPriority = priority;
-                bestDepthTie = entryDepth;
-                victimSlot = slot;
+            if (better) {
+                candSlot = slot;
+                candAgeDelta = ageDelta;
+                candDepth = depth;
+                candPV = pv;
+                candBound = bound;
             }
         }
 
-        return new ProbeResult(base + victimSlot, false);
+        return new ProbeResult(base + candSlot, false);
     }
 
     private long index(long posKey) {
