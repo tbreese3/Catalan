@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 public final class TranspositionTable {
 
-    public static final int SLOTS_PER_SET = 4; // modern 4-way set associativity
+    public static final int SLOTS_PER_SET = 3;
 
     private static final int ENTRY_SIZE_BYTES = 10;
     private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
@@ -203,7 +203,6 @@ public final class TranspositionTable {
 
         boolean replace = keyMismatch
                 || (bound == BOUND_EXACT)
-                || (isPV && !oldPV)
                 || (!entryIsCurrentGen && depth >= existingDepth)
                 || (depth > existingDepth);
 
@@ -239,8 +238,6 @@ public final class TranspositionTable {
         int candSlot = 0;
         int candAgeDelta = 0;
         int candDepth = 0;
-        boolean candPV = false;
-        int candBound = BOUND_NONE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -260,32 +257,24 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int depth = decodeDepth(body) & 0xFF;
-            boolean pv = formerPV(abpv & 0xFF);
-            int bound = boundFromTT(abpv & 0xFF);
 
             if (!hasCandidate) {
                 hasCandidate = true;
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
-                candPV = pv;
-                candBound = bound;
                 continue;
             }
 
             boolean better = false;
             if (ageDelta > candAgeDelta) better = true;
             else if (ageDelta == candAgeDelta && depth < candDepth) better = true;
-            else if (ageDelta == candAgeDelta && depth == candDepth && !pv && candPV) better = true;
-            else if (ageDelta == candAgeDelta && depth == candDepth && pv == candPV && bound != BOUND_EXACT && candBound == BOUND_EXACT) better = true;
-            else if (ageDelta == candAgeDelta && depth == candDepth && pv == candPV && bound == candBound && slot < candSlot) better = true;
+            else if (ageDelta == candAgeDelta && depth == candDepth && slot < candSlot) better = true;
 
             if (better) {
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
-                candPV = pv;
-                candBound = bound;
             }
         }
 
