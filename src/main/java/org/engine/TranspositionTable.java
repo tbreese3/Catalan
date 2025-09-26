@@ -208,26 +208,20 @@ public final class TranspositionTable {
             int existBound = boundFromTT(curAbpv & 0xFF);
             boolean existPv = formerPV(curAbpv & 0xFF);
 
-            // Derived weights from table parameters (no original magic numbers)
-            int depthW = SLOTS_PER_SET + 2;
-            int boundW = SLOTS_PER_SET;
-            int pvW = Math.max(1, SLOTS_PER_SET - 1);
+            int df = newDepth - existingDepth;
+            int baseMargin = Math.max(0, (MAX_AGE - ageDelta) / (SLOTS_PER_SET + 2));
+            int pvBoost = isPV ? Math.max(1, SLOTS_PER_SET / 2) : 0;
+            int boundDelta = ((bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0)
+                    - ((existBound == BOUND_EXACT) ? 3 : (existBound == BOUND_LOWER) ? 2 : (existBound == BOUND_UPPER) ? 1 : 0);
+            int boundBoost = (boundDelta > 0) ? 1 : 0;
 
-            int existBoundRank = (existBound == BOUND_EXACT) ? 3 : (existBound == BOUND_LOWER) ? 2 : (existBound == BOUND_UPPER) ? 1 : 0;
-            int incBoundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            int required = baseMargin - pvBoost - boundBoost;
+            if (required < 0) required = 0;
 
-            int existScore = (existingDepth * depthW)
-                    + (existBoundRank * boundW)
-                    + (existPv ? pvW : 0);
-            int incScore = (newDepth * depthW)
-                    + (incBoundRank * boundW)
-                    + (isPV ? pvW : 0);
+            // Quadratic emphasis on positive depth leads
+            int advantage = (df > 0) ? (df * df) : df; // negative stays linear
 
-            int freshFactor = Math.max(1, (MAX_AGE - ageDelta));
-            long existValue = (long) existScore * (long) freshFactor;
-            long incValue = (long) incScore * (long) MAX_AGE; // current write is always freshest
-
-            overwrite = incValue >= existValue;
+            overwrite = advantage >= required;
         }
 
         if (overwrite) {
@@ -277,18 +271,18 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Derived-weight evict score (smaller is more replaceable)
-            int depthW = SLOTS_PER_SET + 2;
-            int pvPen = SLOTS_PER_SET; // protect PV
-            int boundPen = SLOTS_PER_SET + (SLOTS_PER_SET / 2); // protect stronger bounds a bit more
-            int ageCred = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2)); // reward older entries
+            // Quadratic derived-weight evict score (smaller is more replaceable)
+            int depthW = SLOTS_PER_SET;
+            int ageW = SLOTS_PER_SET + 1;
+            int pvPenalty = Math.max(1, SLOTS_PER_SET - 1);
+            int boundPenaltyUnit = SLOTS_PER_SET;
 
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int evict = (entryDepth * depthW)
-                    + (pv ? pvPen : 0)
-                    + (boundRank * boundPen)
-                    - (ageDelta * ageCred);
+            int evict = (entryDepth * entryDepth * depthW)
+                    - (ageDelta * ageDelta * ageW)
+                    + (pv ? pvPenalty : 0)
+                    + (boundRank * boundPenaltyUnit);
 
             if (slot == 0 || evict < bestEvict) {
                 bestEvict = evict;
