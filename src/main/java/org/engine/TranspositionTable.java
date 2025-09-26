@@ -200,12 +200,14 @@ public final class TranspositionTable {
         int entryAge = ageFromTT(bodyAbpv & 0xFF);
         boolean entryIsCurrentGen = entryAge == (age & 0xFF);
         boolean oldPV = formerPV(bodyAbpv & 0xFF);
+        int oldBound = boundFromTT(bodyAbpv & 0xFF);
 
         boolean replace = keyMismatch
                 || (bound == BOUND_EXACT)
                 || (!entryIsCurrentGen)
                 || (depth > existingDepth)
-                || (isPV && depth == existingDepth);
+                || (isPV && depth == existingDepth)
+                || (!keyMismatch && isImprovedBound(oldBound, bound));
 
         if (replace) {
             bodyDepth = (byte) clamp(depth, 0, 255);
@@ -334,5 +336,13 @@ public final class TranspositionTable {
 
     private static boolean isBodyEmpty(long body) {
         return decodeScore(body) == 0 && decodeAgeBoundPV(body) == 0;
+    }
+
+    private static boolean isImprovedBound(int oldBound, int newBound) {
+        if (newBound == oldBound) return false;
+        if (newBound == BOUND_EXACT) return true;
+        if (oldBound == BOUND_EXACT) return false;
+        if (oldBound == BOUND_NONE && (newBound == BOUND_LOWER || newBound == BOUND_UPPER)) return true;
+        return false;
     }
 }
