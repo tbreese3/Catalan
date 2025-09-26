@@ -113,7 +113,7 @@ public final class TranspositionTable {
     public static int packToTT(int bound, boolean wasPV, int age) {
         return (bound & 0b11) | (wasPV ? 0b100 : 0) | ((age & AGE_MASK) << 3);
     }
-    
+
     public static final class ProbeResult {
         public final int index;
         public final boolean hit;
@@ -202,26 +202,33 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Decayed-score overwrite: collisions/empty/exact/gen-change OR incoming composite score beats decayed existing
+        // Hashed-gated delta overwrite with derived weights
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
-            int existBound = boundFromTT(curAbpv & 0xFF);
-            boolean existPv = formerPV(curAbpv & 0xFF);
+            int existingBound = boundFromTT(curAbpv & 0xFF);
+            boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int df = newDepth - existingDepth;
-            int baseMargin = Math.max(0, (MAX_AGE - ageDelta) / (SLOTS_PER_SET + 2));
-            int pvBoost = isPV ? Math.max(1, SLOTS_PER_SET / 2) : 0;
-            int boundDelta = ((bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0)
-                    - ((existBound == BOUND_EXACT) ? 3 : (existBound == BOUND_LOWER) ? 2 : (existBound == BOUND_UPPER) ? 1 : 0);
-            int boundBoost = (boundDelta > 0) ? 1 : 0;
+            int boundRankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
+            int boundRankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int required = baseMargin - pvBoost - boundBoost;
-            if (required < 0) required = 0;
+            int depthW = (SLOTS_PER_SET * 3) + 1;
+            int boundW = (SLOTS_PER_SET * 2) + 1;
+            int pvW = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 4));
 
-            // Quadratic emphasis on positive depth leads
-            int advantage = (df > 0) ? (df * df) : df; // negative stays linear
+            int deltaDepth = newDepth - existingDepth;
+            int deltaBound = boundRankIncoming - boundRankExisting;
+            int deltaPv = (isPV ? 1 : 0) - (existingPv ? 1 : 0);
 
-            overwrite = advantage >= required;
+            int deltaScore = (deltaDepth * depthW) + (deltaBound * boundW) + (deltaPv * pvW);
+
+            int freshness = Math.max(1, (MAX_AGE - ageDelta));
+            int ageRoot = Math.max(1, (int) Math.sqrt(freshness));
+
+            int bucketHash = (int) (index(key) ^ (index >>> 32));
+            int saltMask = (SLOTS_PER_SET << 1) | 1;
+            int salt = ((bucketHash ^ index) & saltMask) - (saltMask >> 1);
+
+            overwrite = (deltaScore * ageRoot) > salt;
         }
 
         if (overwrite) {
@@ -271,18 +278,22 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Quadratic derived-weight evict score (smaller is more replaceable)
-            int depthW = SLOTS_PER_SET;
-            int ageW = SLOTS_PER_SET + 1;
-            int pvPenalty = Math.max(1, SLOTS_PER_SET - 1);
-            int boundPenaltyUnit = SLOTS_PER_SET;
+            int depthW = (SLOTS_PER_SET * 3) + 1;
+            int ageUnit = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 3));
+            int pvPen = Math.max(1, SLOTS_PER_SET - 1);
+            int boundUnit = (SLOTS_PER_SET * 2) + 1;
 
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            int ageTri = (ageDelta * (ageDelta + 1)) / 2;
+
+            int bucketHash = (int) (index(key) ^ (index >>> 32) ^ base ^ slot);
+            int salt = bucketHash & ((SLOTS_PER_SET << 1) | 1);
 
             int evict = (entryDepth * entryDepth * depthW)
-                    - (ageDelta * ageDelta * ageW)
-                    + (pv ? pvPenalty : 0)
-                    + (boundRank * boundPenaltyUnit);
+                    + (pv ? pvPen : 0)
+                    + (boundRank * boundUnit)
+                    - (ageTri * ageUnit)
+                    + salt;
 
             if (slot == 0 || evict < bestEvict) {
                 bestEvict = evict;
