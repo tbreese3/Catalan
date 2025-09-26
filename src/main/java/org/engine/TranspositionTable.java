@@ -204,10 +204,9 @@ public final class TranspositionTable {
 
         boolean replace = keyMismatch
                 || (bound == BOUND_EXACT)
+                || (!entryIsCurrentGen)
                 || (depth > existingDepth)
-                || (!entryIsCurrentGen && depth >= existingDepth)
-                || (isPV && !oldPV)
-                || (!keyMismatch && oldBound < bound);
+                || (!keyMismatch && isImprovedBound(oldBound, bound));
 
         if (replace) {
             bodyDepth = (byte) clamp(depth, 0, 255);
@@ -241,6 +240,7 @@ public final class TranspositionTable {
         int candSlot = 0;
         int candAgeDelta = 0;
         int candDepth = 0;
+        boolean candPV = false;
         int candBound = BOUND_NONE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
@@ -261,6 +261,7 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int depth = decodeDepth(body) & 0xFF;
+            boolean pv = formerPV(abpv & 0xFF);
             int bound = boundFromTT(abpv & 0xFF);
 
             if (!hasCandidate) {
@@ -268,20 +269,23 @@ public final class TranspositionTable {
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
+                candPV = pv;
                 candBound = bound;
                 continue;
             }
 
             boolean better = false;
-            if (depth < candDepth) better = true; // prefer shallower
-            else if (depth == candDepth && ageDelta > candAgeDelta) better = true; // then staler
-            else if (depth == candDepth && ageDelta == candAgeDelta && bound != BOUND_EXACT && candBound == BOUND_EXACT) better = true; // avoid evicting exact
-            else if (depth == candDepth && ageDelta == candAgeDelta && bound == candBound && slot < candSlot) better = true; // stable tie
+            if (ageDelta > candAgeDelta) better = true; // staler first
+            else if (ageDelta == candAgeDelta && depth < candDepth) better = true; // then shallower
+            else if (ageDelta == candAgeDelta && depth == candDepth && candBound == BOUND_EXACT && bound != BOUND_EXACT) better = true; // avoid evicting exact
+            else if (ageDelta == candAgeDelta && depth == candDepth && !pv && candPV) better = true; // prefer evicting non-PV
+            else if (ageDelta == candAgeDelta && depth == candDepth && pv == candPV && slot < candSlot) better = true; // deterministic tie
 
             if (better) {
                 candSlot = slot;
                 candAgeDelta = ageDelta;
                 candDepth = depth;
+                candPV = pv;
                 candBound = bound;
             }
         }
@@ -340,5 +344,16 @@ public final class TranspositionTable {
 
     private static boolean isBodyEmpty(long body) {
         return decodeScore(body) == 0 && decodeAgeBoundPV(body) == 0;
+    }
+
+    // Original helper: treat bounds by usefulness without numeric comparison
+    private static boolean isImprovedBound(int oldBound, int newBound) {
+        if (newBound == oldBound) return false;
+        if (newBound == BOUND_EXACT) return true;
+        if (oldBound == BOUND_EXACT) return false;
+        // Upgrading from NONE to any bound is considered improvement
+        if (oldBound == BOUND_NONE && (newBound == BOUND_LOWER || newBound == BOUND_UPPER)) return true;
+        // Switching between LOWER and UPPER is not inherently better here
+        return false;
     }
 }
