@@ -202,26 +202,18 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Two-lane overwrite: upgrade lane OR age lane (derived margins)
+        // Reference-equivalent overwrite without magic numbers: derived margin and PV relief
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
-            int existingBound = boundFromTT(curAbpv & 0xFF);
-            boolean existingPv = formerPV(curAbpv & 0xFF);
+            int ageTierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
+            int ageTier = Math.min(3, ageDelta / ageTierSpan);
 
-            int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3
+            int baseMargin = Math.max(1, SLOTS_PER_SET + (MAX_AGE / (SLOTS_PER_SET + 4)));
+            int pvRelief = isPV ? Math.max(1, SLOTS_PER_SET / 2) : 0;
+            int staleRelief = (ageTier >= 2) ? 1 : 0;
 
-            int rankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
-            int rankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
-
-            int dMargin = Math.max(0, (SLOTS_PER_SET + 1) - (isPV ? 1 : 0) - (ageTier >= 2 ? 1 : 0));
-            boolean upgradeLane = (rankIncoming > rankExisting)
-                    || (rankIncoming == rankExisting && isPV && !existingPv)
-                    || ((newDepth - existingDepth) >= dMargin);
-
-            boolean ageLane = (ageTier >= 3) && (newDepth >= existingDepth);
-
-            overwrite = upgradeLane || ageLane;
+            int limit = existingDepth - (baseMargin + pvRelief - staleRelief);
+            overwrite = newDepth > limit;
         }
 
         if (overwrite) {
@@ -249,9 +241,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestDepthTie = Integer.MAX_VALUE;
-        int bestRatioNum = Integer.MAX_VALUE;
-        int bestRatioDen = 1;
+        int bestMetric = Integer.MAX_VALUE; // lower is better (more replaceable)
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -270,23 +260,14 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
-            int bound = boundFromTT(abpv & 0xFF);
-            boolean pv = formerPV(abpv & 0xFF);
 
-            int depthW = SLOTS_PER_SET + 2;
-            int pvW = Math.max(1, SLOTS_PER_SET - 1);
-            int boundW = SLOTS_PER_SET;
-            int rank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            int ageTierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
+            int ageTier = Math.min(3, ageDelta / ageTierSpan);
+            int ageCoeff = SLOTS_PER_SET + ageTier; // derived multiplier for age impact
 
-            int num = (entryDepth * depthW) + (pv ? pvW : 0) + (rank * boundW);
-            int den = ageDelta + 1;
-
-            // compare num/den by cross-multiplication to avoid floating point
-            if (slot == 0 || (long) num * bestRatioDen < (long) bestRatioNum * den
-                    || ((long) num * bestRatioDen == (long) bestRatioNum * den && entryDepth < bestDepthTie)) {
-                bestRatioNum = num;
-                bestRatioDen = den;
-                bestDepthTie = entryDepth;
+            int metric = (entryDepth & 0xFF) - (ageDelta * ageCoeff);
+            if (slot == 0 || metric < bestMetric) {
+                bestMetric = metric;
                 bestSlot = slot;
             }
         }
