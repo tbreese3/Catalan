@@ -201,21 +201,24 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Stockfish-like replacement rule:
-        // - Always replace on key mismatch (collision)
-        // - Replace if Exact bound (strong info)
-        // - Replace if different generation (keep table fresh)
-        // - Replace if new depth is competitive (>= oldDepth - 2), with small PV bias
-        int depthSlack = 2 - (isPV ? 1 : 0); // PV entries are a bit more lenient
-        boolean replace = keyMismatch
-                || emptySlot
-                || (bound == BOUND_EXACT)
-                || (entryAge != (age & 0xFF))
-                || (newDepth >= Math.max(0, existingDepth - depthSlack));
+        // Replacement policy tuned for high occupancy:
+        // - Always replace on collision or empty slot
+        // - Replace if different generation (stale)
+        // - For same-key same-generation: replace only if deeper, or exact and not much shallower
+        boolean replace;
+        if (emptySlot || keyMismatch || (entryAge != (age & 0xFF))) {
+            replace = true;
+        } else {
+            // Same key and current generation
+            if (bound == BOUND_EXACT) {
+                replace = newDepth >= Math.max(0, existingDepth - 2);
+            } else {
+                replace = newDepth >= existingDepth;
+            }
+        }
 
         if (replace) {
-            boolean persistPV = isPV || ((curAbpv & 0xFF) != 0 && formerPV(curAbpv & 0xFF));
-            byte newAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
+            byte newAbpv = (byte) packToTT(bound, isPV, age & 0xFF);
             long newBody = encodeBody(
                     newPackedMove,
                     (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE),
@@ -261,8 +264,12 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Replacement heuristic similar to top engines: favor replacing older, shallow, non-exact, non-PV entries
-            int score = (ageDelta << 10) - (entryDepth << 4) - (bound == BOUND_EXACT ? 128 : 0) - (pv ? 32 : 0);
+            // Replacement heuristic tuned for high occupancy:
+            // Strongly prefer replacing older generations, then UPPER > LOWER > EXACT, then shallow, then non-PV
+            int boundPenalty;
+            if (bound == BOUND_EXACT) boundPenalty = 1024; else if (bound == BOUND_LOWER) boundPenalty = 256; else boundPenalty = 0;
+            int pvPenalty = pv ? 512 : 0;
+            int score = (ageDelta << 12) - (entryDepth << 6) - boundPenalty - pvPenalty;
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
