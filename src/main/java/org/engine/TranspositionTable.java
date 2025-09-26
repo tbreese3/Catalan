@@ -199,6 +199,7 @@ public final class TranspositionTable {
 
         int entryAge = ageFromTT(curAbpv & 0xFF);
         int newDepth = clamp(depth, 0, 255);
+        int existingDepth = curDepth & 0xFF;
 
         // Rule-based overwrite: EXACT/key/gen-change OR PV/equal-depth, else deeper wins (protect existing PV/EXACT)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
