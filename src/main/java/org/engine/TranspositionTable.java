@@ -202,33 +202,39 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Hashed-gated delta overwrite with derived weights
+        // Rotation-based lexicographic overwrite using derived tiers (novel, single-pass)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int boundRankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
-            int boundRankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 1));
+            boolean existingStale = ageDelta >= tierSpan; // derived staleness
 
-            int depthW = (SLOTS_PER_SET * 3) + 1;
-            int boundW = (SLOTS_PER_SET * 2) + 1;
-            int pvW = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 4));
+            int rankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
+            int rankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int deltaDepth = newDepth - existingDepth;
-            int deltaBound = boundRankIncoming - boundRankExisting;
-            int deltaPv = (isPV ? 1 : 0) - (existingPv ? 1 : 0);
+            int rotation = (int) ((key ^ (key >>> 32)) & 3);
 
-            int deltaScore = (deltaDepth * depthW) + (deltaBound * boundW) + (deltaPv * pvW);
+            boolean betterFresh = existingStale;
+            boolean betterBound = rankIncoming > rankExisting;
+            boolean betterPv = isPV && !existingPv;
+            boolean betterDepth = newDepth > existingDepth;
 
-            int freshness = Math.max(1, (MAX_AGE - ageDelta));
-            int ageRoot = Math.max(1, (int) Math.sqrt(freshness));
-
-            int bucketHash = (int) (index(key) ^ (key >>> 32));
-            int saltMask = (SLOTS_PER_SET << 1) | 1;
-            int salt = ((bucketHash ^ index) & saltMask) - (saltMask >> 1);
-
-            overwrite = (deltaScore * ageRoot) > salt;
+            switch (rotation) {
+                case 0:
+                    overwrite = betterFresh || (betterBound || (rankIncoming == rankExisting && (betterPv || betterDepth)));
+                    break;
+                case 1:
+                    overwrite = betterBound || (rankIncoming == rankExisting && (betterPv || betterFresh || betterDepth));
+                    break;
+                case 2:
+                    overwrite = betterPv || (isPV == existingPv && (betterFresh || betterBound || betterDepth));
+                    break;
+                default:
+                    overwrite = betterDepth || (!betterDepth && (betterBound || betterPv || betterFresh));
+                    break;
+            }
         }
 
         if (overwrite) {
@@ -278,22 +284,20 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int depthW = (SLOTS_PER_SET * 3) + 1;
-            int ageUnit = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 3));
+            // Harmonic replaceability (larger means more replaceable), select minimal evict = -replace
+            int scale = (SLOTS_PER_SET + 3) * 64;
+            int depthInv = scale / (entryDepth + 1); // favor shallow
+
+            int ageW = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
+            int ageGain = ageDelta * ageW; // favor older
+
             int pvPen = Math.max(1, SLOTS_PER_SET - 1);
-            int boundUnit = (SLOTS_PER_SET * 2) + 1;
-
+            int boundPenUnit = SLOTS_PER_SET;
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
-            int ageTri = (ageDelta * (ageDelta + 1)) / 2;
+            int penalties = (pv ? pvPen : 0) + (boundRank * boundPenUnit);
 
-            int bucketHash = (int) (index(key) ^ (key >>> 32) ^ base ^ slot);
-            int salt = bucketHash & ((SLOTS_PER_SET << 1) | 1);
-
-            int evict = (entryDepth * entryDepth * depthW)
-                    + (pv ? pvPen : 0)
-                    + (boundRank * boundUnit)
-                    - (ageTri * ageUnit)
-                    + salt;
+            int replaceability = ageGain + depthInv - penalties;
+            int evict = -replaceability;
 
             if (slot == 0 || evict < bestEvict) {
                 bestEvict = evict;
