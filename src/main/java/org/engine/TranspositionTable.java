@@ -198,17 +198,21 @@ public final class TranspositionTable {
         int adjScore = (score == SCORE_VOID) ? SCORE_VOID : scoreToTT(score, ply);
 
         int entryAge = ageFromTT(curAbpv & 0xFF);
-        int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
-        int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
+        // Rule-based overwrite: EXACT/key/gen-change OR PV/equal-depth, else deeper wins (protect existing PV/EXACT)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
+            int existingBound = boundFromTT(curAbpv & 0xFF);
+            boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int slackBase = Math.max(1, (MAX_AGE >> 2) - SLOTS_PER_SET);
-            int pvRelief = isPV ? Math.max(1, SLOTS_PER_SET - 1) : 0;
-            int limit = existingDepth - (slackBase + pvRelief);
-            overwrite = newDepth > limit;
+            if (isPV) {
+                overwrite = newDepth >= existingDepth;
+            } else if (existingPv || existingBound == BOUND_EXACT) {
+                overwrite = newDepth > existingDepth;
+            } else {
+                overwrite = newDepth >= existingDepth;
+            }
         }
 
         if (overwrite) {
@@ -235,8 +239,9 @@ public final class TranspositionTable {
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        int bestSlot = 0;
-        int bestMetric = Integer.MAX_VALUE; // lower is better (more replaceable)
+        int victimSlot = 0;
+        int bestPriority = Integer.MAX_VALUE;
+        int bestDepthTie = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -253,18 +258,30 @@ public final class TranspositionTable {
 
             byte abpv = decodeAgeBoundPV(body);
             int entryAge = ageFromTT(abpv & 0xFF);
-            int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
+            int bound = boundFromTT(abpv & 0xFF);
+            boolean pv = formerPV(abpv & 0xFF);
 
-            int ageCoeff = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 5));
-            int metric = (entryDepth & 0xFF) - (ageDelta * ageCoeff);
-            if (slot == 0 || metric < bestMetric) {
-                bestMetric = metric;
-                bestSlot = slot;
+            boolean stale = entryAge != (age & 0xFF);
+            boolean exact = (bound == BOUND_EXACT);
+
+            int priority;
+            if (stale) {
+                priority = (!pv && !exact) ? 0 : 1;
+            } else {
+                if (!pv && !exact) priority = 2;
+                else if (!exact) priority = 3;
+                else priority = 4;
+            }
+
+            if (priority < bestPriority || (priority == bestPriority && entryDepth < bestDepthTie)) {
+                bestPriority = priority;
+                bestDepthTie = entryDepth;
+                victimSlot = slot;
             }
         }
 
-        return new ProbeResult(base + bestSlot, false);
+        return new ProbeResult(base + victimSlot, false);
     }
 
     private long index(long posKey) {
