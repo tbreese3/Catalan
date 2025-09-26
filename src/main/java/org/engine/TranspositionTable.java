@@ -202,30 +202,32 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
+        // Dynamic tiered overwrite: collisions/empty/exact/gen-change OR depth lead meets tiered margin
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int incomingWins = 0;
-            int existingWins = 0;
+            int tierSpan = Math.max(1, MAX_AGE / 8);
+            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3
 
-            int boundRankExisting = (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
-            int boundRankIncoming = (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
-            if (boundRankIncoming > boundRankExisting) incomingWins++; else if (boundRankIncoming < boundRankExisting) existingWins++;
+            int requiredLead = (SLOTS_PER_SET + 1);
+            if (isPV) requiredLead -= 1;
+            if (ageTier >= 2) requiredLead -= 1;
+            if (requiredLead < 0) requiredLead = 0;
 
-            int pvRankExisting = existingPv ? 1 : 0;
-            int pvRankIncoming = isPV ? 1 : 0;
-            if (pvRankIncoming > pvRankExisting) incomingWins++; else if (pvRankIncoming < pvRankExisting) existingWins++;
-
-            int margin = 5 - (isPV ? 2 : 0);
-            if (margin < 0) margin = 0;
-            boolean depthCompetitive = (existingDepth - newDepth) < margin;
-            if (depthCompetitive) incomingWins++; else existingWins++;
-
-            if (ageDelta >= 2) incomingWins++;
-
-            overwrite = (incomingWins > existingWins);
+            int lead = newDepth - existingDepth;
+            if (lead >= requiredLead) overwrite = true;
+            else if (lead >= 0) {
+                int incomingBoundPrio = (bound == BOUND_EXACT) ? 3
+                        : (bound == BOUND_LOWER) ? 2
+                        : (bound == BOUND_UPPER) ? 1 : 0;
+                int existBoundPrio = (existingBound == BOUND_EXACT) ? 3
+                        : (existingBound == BOUND_LOWER) ? 2
+                        : (existingBound == BOUND_UPPER) ? 1 : 0;
+                if (incomingBoundPrio > existBoundPrio) overwrite = true;
+                else if (incomingBoundPrio == existBoundPrio && isPV && !existingPv) overwrite = true;
+            }
         }
 
         if (overwrite) {
@@ -275,11 +277,20 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Priority code (minimize): age first, then bound/PV, then depth
-            int ageTier = (ageDelta >= 6) ? 0 : (ageDelta >= 3) ? 1 : (ageDelta >= 1) ? 2 : 3; // older -> smaller
-            int boundPen = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 1 : 0;
-            int pvPen = pv ? 1 : 0;
-            int code = (ageTier * 1024) + ((boundPen + pvPen) * 64) + (entryDepth & 0xFF);
+            int tierSpan = Math.max(1, MAX_AGE / 8);
+            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3 (older -> higher tier)
+            int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+
+            int W1 = SLOTS_PER_SET * 64; // age tier weight
+            int W2 = SLOTS_PER_SET * 8;  // bound weight
+            int W3 = SLOTS_PER_SET * 4;  // PV weight
+
+            int agePenalty = ageTier * W1;                         // older (higher tier) -> larger penalty? invert to reward
+            int ageCode = (3 - ageTier) * W1;                      // reward older (smaller code)
+            int boundCode = (3 - boundRank) * W2;                  // reward stronger bound
+            int pvCode = (!pv ? W3 : 0);                           // reward PV
+
+            int code = ageCode + boundCode + pvCode + (entryDepth & 0xFF);
 
             if (slot == 0 || code < bestCode) {
                 bestCode = code;
