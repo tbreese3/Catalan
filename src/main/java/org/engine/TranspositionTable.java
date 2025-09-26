@@ -212,9 +212,11 @@ public final class TranspositionTable {
         } else if (entryAge != curAge) {
             replace = true;
         } else if (bound == BOUND_EXACT) {
-            replace = newDepth + 1 >= existingDepth;
+            // Only overwrite with EXACT if at least equal depth
+            replace = newDepth >= existingDepth;
         } else if (existingBound == BOUND_EXACT) {
-            replace = newDepth >= existingDepth + 2;
+            // Protect existing EXACT unless we are significantly deeper
+            replace = newDepth >= existingDepth + 3;
         } else {
             replace = (newDepth > existingDepth) || (newDepth == existingDepth && isPV && !existingPv);
         }
@@ -267,10 +269,12 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int ageWeight = ageDelta * ageDelta * 9;
-            int depthWeight = entryDepth * entryDepth;
-            int boundPenalty = (bound == BOUND_EXACT) ? 1600 : (bound == BOUND_LOWER ? 240 : 0);
-            int pvPenalty = pv ? 700 : 0;
+            int aged = ageDelta > 12 ? 12 : ageDelta; // clamp age impact
+            int ageWeight = aged * aged * 12;
+            int depthWeight = entryDepth * entryDepth * 2;
+            int boundPenalty;
+            if (bound == BOUND_EXACT) boundPenalty = 2200; else if (bound == BOUND_LOWER) boundPenalty = 350; else if (bound == BOUND_UPPER) boundPenalty = 200; else boundPenalty = 0;
+            int pvPenalty = pv ? 800 : 0;
             int score = ageWeight - depthWeight - boundPenalty - pvPenalty;
             if (score > replaceScore) {
                 replaceScore = score;
