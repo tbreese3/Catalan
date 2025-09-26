@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 public final class TranspositionTable {
 
-    public static final int SLOTS_PER_SET = 4; // modern 4-way set associativity
+    public static final int SLOTS_PER_SET = 3;
 
     private static final int ENTRY_SIZE_BYTES = 10;
     private static final int SET_SIZE_BYTES_NO_PADDING = SLOTS_PER_SET * ENTRY_SIZE_BYTES; // 30 bytes
@@ -191,9 +191,11 @@ public final class TranspositionTable {
         boolean keyMismatch = (existingKey & 0xFFFF) != wantKey;
         boolean emptySlot = isBodyEmpty(body) || (existingKey & 0xFFFF) == 0;
 
-        // Move handling: top engines typically keep existing move if none provided
-        short newPackedMove = (short) (move & 0xFFFF);
-        if (newPackedMove == 0) newPackedMove = curMove;
+        // Move handling: keep existing unless a move is provided or key changes
+        short newPackedMove = curMove;
+        if (((move & 0xFFFF) != 0) || keyMismatch) {
+            newPackedMove = (short) (move & 0xFFFF);
+        }
 
         int adjScore = (score == SCORE_VOID) ? SCORE_VOID : scoreToTT(score, ply);
 
@@ -203,22 +205,17 @@ public final class TranspositionTable {
         int newDepth = clamp(depth, 0, 255);
 
 
-        // Divergent but equivalent: quality-oriented acceptance instead of slack comparison
-        final int[] BOUND_SCORE = { 0, 24, 12, 128 }; // NONE, LOWER, UPPER, EXACT
-        int oldBoundIdx = boundFromTT(curAbpv & 0xFF);
-        boolean oldPv = formerPV(curAbpv & 0xFF);
-        int oldMoveBonus = (curMove & 0xFFFF) != 0 ? 1 : 0;
-        int newMoveBonus = (newPackedMove & 0xFFFF) != 0 ? 1 : 0;
-        int currentQuality = (existingDepth << 6) + BOUND_SCORE[oldBoundIdx] + (oldPv ? 3 : 0) + oldMoveBonus;
-        int incomingQuality = (newDepth << 6) + BOUND_SCORE[bound] + (isPV ? 3 : 0) + newMoveBonus;
-
-        boolean replace = keyMismatch
-                || emptySlot
+        int existingDom = (existingDepth << 2) + (formerPV(curAbpv & 0xFF) ? 2 : 0);
+        int incomingDom = (newDepth << 2) + (isPV ? 3 : 0);
+        boolean overwrite = emptySlot
+                || keyMismatch
                 || (entryAge != (age & 0xFF))
-                || (BOUND_SCORE[bound] >= 128) // accept EXACT always
-                || (incomingQuality >= currentQuality);
+                || (bound == BOUND_EXACT);
+        if (!overwrite) {
+            overwrite = incomingDom > (existingDom + 5);
+        }
 
-        if (replace) {
+        if (overwrite) {
             boolean persistPV = isPV || ((curAbpv & 0xFF) != 0 && formerPV(curAbpv & 0xFF));
             byte newAbpv = (byte) packToTT(bound, persistPV, age & 0xFF);
             long newBody = encodeBody(
@@ -230,8 +227,7 @@ public final class TranspositionTable {
             );
             bodies[index] = newBody;
             keys[index] = (short) wantKey;
-        } else if (!keyMismatch && (move & 0xFFFF) != 0 && newPackedMove != curMove) {
-            // Same position but not replacing fully: refresh best move only
+        } else if (!keyMismatch && newPackedMove != curMove) {
             long newBody = encodeBody(newPackedMove, curScore, curEval, curDepth, curAbpv);
             bodies[index] = newBody;
         }
@@ -243,8 +239,8 @@ public final class TranspositionTable {
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        int replaceSlot = 0;
-        int replaceScore = Integer.MIN_VALUE; // higher is more replaceable
+        int bestSlot = 0;
+        int bestScore = Integer.MIN_VALUE; 
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -256,31 +252,22 @@ public final class TranspositionTable {
 
             long body = bodies[idx];
             if (isBodyEmpty(body)) {
-                return new ProbeResult(idx, false); // empty slot wins immediately
+                return new ProbeResult(idx, false);
             }
 
             byte abpv = decodeAgeBoundPV(body);
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
-            int bound = boundFromTT(abpv & 0xFF);
-            boolean pv = formerPV(abpv & 0xFF);
 
-            // Divergent but equivalent: combined quadratic-linear age and depth scales
-            int ageTerm = ((ageDelta * ageDelta) + ageDelta) << 9;               // ~ (age^2 + age) * 512
-            int depthTerm = ((entryDepth * entryDepth) + entryDepth) << 5;       // ~ (depth^2 + depth) * 32
-            int exactPenalty = (bound == BOUND_EXACT ? (3 << 9) : 0);            // 1536
-            int lowerPenalty = (bound == BOUND_LOWER ? (3 << 7) : 0);            // 384
-            int upperPenalty = (bound == BOUND_UPPER ? (1 << 7) : 0);            // 128
-            int pvPenalty = pv ? (1 << 8) : 0;                                   // 256
-            int score = ageTerm - depthTerm - exactPenalty - lowerPenalty - upperPenalty - pvPenalty;
-            if (score > replaceScore) {
-                replaceScore = score;
-                replaceSlot = slot;
+            int score = (ageDelta << 2) - (entryDepth & 0xFF);
+            if (slot == 0 || score > bestScore) {
+                bestScore = score;
+                bestSlot = slot;
             }
         }
 
-        return new ProbeResult(base + replaceSlot, false);
+        return new ProbeResult(base + bestSlot, false);
     }
 
     private long index(long posKey) {
