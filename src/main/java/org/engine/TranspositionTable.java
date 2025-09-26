@@ -202,38 +202,26 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Simple normalized score overwrite: derived weights with age relief
+        // Two-lane overwrite: upgrade lane OR age lane (derived margins)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
             int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / tierSpan);
+            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3
 
             int rankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
             int rankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int Wd = SLOTS_PER_SET + 2;
-            int Wb = SLOTS_PER_SET + 1;
-            int Wp = Math.max(1, SLOTS_PER_SET - 1);
-            int WfreshHi = SLOTS_PER_SET;
-            int WfreshLo = Math.max(1, SLOTS_PER_SET / 2);
+            int dMargin = Math.max(0, (SLOTS_PER_SET + 1) - (isPV ? 1 : 0) - (ageTier >= 2 ? 1 : 0));
+            boolean upgradeLane = (rankIncoming > rankExisting)
+                    || (rankIncoming == rankExisting && isPV && !existingPv)
+                    || ((newDepth - existingDepth) >= dMargin);
 
-            int freshBonus = (entryAge == (age & 0xFF)) ? WfreshHi
-                    : (ageDelta <= Math.max(1, MAX_AGE / (SLOTS_PER_SET + 4)) ? WfreshLo : 0);
+            boolean ageLane = (ageTier >= 3) && (newDepth >= existingDepth);
 
-            int existingRaw = (existingDepth * Wd)
-                    + (rankExisting * Wb)
-                    + (existingPv ? Wp : 0)
-                    + freshBonus;
-
-            int incomingRaw = (newDepth * Wd)
-                    + (rankIncoming * Wb)
-                    + (isPV ? Wp : 0);
-
-            int ageRelief = ageTier * Math.max(1, WfreshHi / 2);
-            overwrite = incomingRaw >= (existingRaw - ageRelief);
+            overwrite = upgradeLane || ageLane;
         }
 
         if (overwrite) {
@@ -261,7 +249,9 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        long bestKeep = Long.MAX_VALUE; // minimize keep score to evict
+        int bestDepthTie = Integer.MAX_VALUE;
+        int bestRatioNum = Integer.MAX_VALUE;
+        int bestRatioDen = 1;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -283,20 +273,20 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int Wd = SLOTS_PER_SET + 2;
-            int Wb = SLOTS_PER_SET + 1;
-            int Wp = Math.max(1, SLOTS_PER_SET - 1);
+            int depthW = SLOTS_PER_SET + 2;
+            int pvW = Math.max(1, SLOTS_PER_SET - 1);
+            int boundW = SLOTS_PER_SET;
+            int rank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
-            int freshness = Math.max(1, MAX_AGE - ageDelta);
+            int num = (entryDepth * depthW) + (pv ? pvW : 0) + (rank * boundW);
+            int den = ageDelta + 1;
 
-            long weightSum = (long) ((entryDepth + 1) * Wd)
-                    + (long) (boundRank * Wb)
-                    + (long) (pv ? Wp : 0);
-            long keep = weightSum * (long) freshness;
-
-            if (slot == 0 || keep < bestKeep) {
-                bestKeep = keep;
+            // compare num/den by cross-multiplication to avoid floating point
+            if (slot == 0 || (long) num * bestRatioDen < (long) bestRatioNum * den
+                    || ((long) num * bestRatioDen == (long) bestRatioNum * den && entryDepth < bestDepthTie)) {
+                bestRatioNum = num;
+                bestRatioDen = den;
+                bestDepthTie = entryDepth;
                 bestSlot = slot;
             }
         }
