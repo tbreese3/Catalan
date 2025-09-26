@@ -168,149 +168,138 @@ public final class TranspositionTable {
         short existingKey = keys[entryIndex];
         int wantKey = (int) (key & 0xFFFFL);
         boolean keyMatch = (existingKey & 0xFFFF) == wantKey;
-        
-        // Modern approach: simpler and more aggressive replacement
-        // Key principles:
-        // 1. Always replace on key match
-        // 2. For different position, probe() already selected the victim
-        // 3. Preserve move from previous searches when we don't have one
-        
-        long existingBody = bodies[entryIndex];
+
+        long existingBody = keyMatch ? bodies[entryIndex] : 0L;
         byte existingAbpv = keyMatch ? decodeAgeBoundPV(existingBody) : 0;
+        byte existingDepth = keyMatch ? decodeDepth(existingBody) : 0;
+        int existingBound = keyMatch ? boundFromTT(existingAbpv & 0xFF) : BOUND_NONE;
         short existingMove = keyMatch ? decodePackedMove(existingBody) : 0;
+        short existingScore = keyMatch ? decodeScore(existingBody) : 0;
         boolean existingPV = keyMatch && formerPV(existingAbpv & 0xFF);
-        
-        // Preserve best move if we don't have one from current search
+
+        // Candidate move to store: prefer current, otherwise keep old
         short bestMove = (short) (move & 0xFFFF);
-        if (bestMove == 0 && existingMove != 0) {
-            bestMove = existingMove;
-        }
-        
-        // Modern engines use simple depth-based replacement with small adjustments
-        if (keyMatch) {
-            // Same position - decide whether to update
-            byte existingDepth = decodeDepth(existingBody);
-            int existingBound = boundFromTT(existingAbpv & 0xFF);
-            
-            // Update conditions (following Stockfish logic):
-            // 1. New search is deeper by at least 2 plies, OR
-            // 2. New search has exact bound (most valuable), OR  
-            // 3. Existing entry has upper bound (least valuable)
-            // This gives slight preference to exact bounds and PV nodes
-            boolean shouldUpdate = 
-                depth + 2 >= existingDepth ||
-                bound == BOUND_EXACT ||
-                existingBound == BOUND_UPPER;
-                
-            if (!shouldUpdate) {
-                // Keep existing entry but might need to refresh generation
-                int currentGen = age & 0xFF;
-                int existingGen = ageFromTT(existingAbpv & 0xFF);
-                if (existingGen != currentGen) {
-                    // Refresh generation to protect from replacement
-                    byte refreshedAbpv = (byte) packToTT(existingBound, existingPV, currentGen);
-                    long refreshedBody = encodeBody(existingMove, decodeScore(existingBody), 
-                                                   decodeEval(existingBody), existingDepth, refreshedAbpv);
-                    bodies[entryIndex] = refreshedBody;
-                }
-                return;
-            }
-        }
-        
-        // Store the new entry
+        if (bestMove == 0 && existingMove != 0) bestMove = existingMove;
+
+        // Compute new packed fields
         byte newDepth = (byte) clamp(depth, 0, 255);
-        boolean newPV = isPV || existingPV;  // PV flag is sticky - once PV, always PV
+        boolean newPV = isPV || existingPV; // PV flag is sticky
         int currentGen = age & 0xFF;
         byte newAbpv = (byte) packToTT(bound, newPV, currentGen);
-        
+
         // Handle mate scores - adjust relative to root
         int adjScore = (score == SCORE_VOID) ? score : scoreToTT(score, ply);
         short newScore = (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE);
         short newEval = (short) clamp(eval, Short.MIN_VALUE, Short.MAX_VALUE);
-        
-        // Pack and store the entry
-        long newBody = encodeBody(bestMove, newScore, newEval, newDepth, newAbpv);
-        bodies[entryIndex] = newBody;
-        keys[entryIndex] = (short) wantKey;
+
+        if (keyMatch) {
+            // Avoid degrading a deeper exact entry with a shallow non-exact one
+            boolean avoidDegradingExact = (existingBound == BOUND_EXACT) && (bound != BOUND_EXACT) && (depth + 2 < (existingDepth & 0xFF));
+            boolean evalOnlyIncoming = (newScore == SCORE_VOID);
+            boolean existingHasSearch = (existingScore != SCORE_VOID);
+
+            boolean shouldUpdate = !avoidDegradingExact && (
+                    bound == BOUND_EXACT ||
+                    depth + 2 >= (existingDepth & 0xFF) ||
+                    existingBound == BOUND_UPPER
+            );
+
+            // Do not replace a searched entry with an eval-only update
+            if (evalOnlyIncoming && existingHasSearch) shouldUpdate = false;
+
+            if (shouldUpdate) {
+                long newBody = encodeBody(bestMove, newScore, newEval, newDepth, newAbpv);
+                bodies[entryIndex] = newBody;
+                keys[entryIndex] = (short) wantKey;
+                return;
+            } else {
+                // Partial refresh: update generation, preserve strong info, optionally add move/eval
+                short keptMove = existingMove != 0 ? existingMove : bestMove;
+                short keptScore = existingScore; // keep searched result if present
+                short keptEval = (evalOnlyIncoming ? newEval : (short) decodeEval(existingBody));
+                byte refreshedAbpv = (byte) packToTT(existingBound, newPV, currentGen);
+                long refreshedBody = encodeBody(keptMove, keptScore, keptEval, existingDepth, refreshedAbpv);
+                bodies[entryIndex] = refreshedBody;
+                // key unchanged
+                return;
+            }
+        } else {
+            // No key match; victim index already chosen by probe()
+            long newBody = encodeBody(bestMove, newScore, newEval, newDepth, newAbpv);
+            bodies[entryIndex] = newBody;
+            keys[entryIndex] = (short) wantKey;
+            return;
+        }
     }
 
     public ProbeResult probe(long key) {
         if (bodies == null || numBuckets == 0) return new ProbeResult(0, false);
-        
-        // Modern engines prefetch here to warm CPU cache, but as requested, not implementing prefetch
-        // prefetch(key); // Would prefetch the bucket into L1/L2 cache
-        
+
         int bucket = (int) index(key);
         int base = setBase(bucket);
         int wantKey = (int) (key & 0xFFFFL);
 
-        // First pass: look for exact key match
+        // First pass: look for exact key match and refresh generation on hit
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
             short k = keys[idx];
-            
+
             if ((k & 0xFFFF) == wantKey) {
-                // Found matching key
                 long body = bodies[idx];
                 if (body == 0L) {
-                    // Corrupted entry - treat as miss but keep slot
+                    // Corrupted or cleared entry - treat as miss but keep slot
                     return new ProbeResult(idx, false);
+                }
+                byte abpv = decodeAgeBoundPV(body);
+                int entryAge = ageFromTT(abpv & 0xFF);
+                int currentGen = age & 0xFF;
+                if (entryAge != currentGen) {
+                    int bound = boundFromTT(abpv & 0xFF);
+                    boolean wasPv = formerPV(abpv & 0xFF);
+                    byte refreshedAbpv = (byte) packToTT(bound, wasPv, currentGen);
+                    long refreshed = (body & ~(0xFFL << 56)) | ((refreshedAbpv & 0xFFL) << 56);
+                    bodies[idx] = refreshed;
                 }
                 return new ProbeResult(idx, true);
             }
         }
-        
+
         // No key match found - select victim for replacement
-        // Modern replacement strategy from Stockfish: 
-        // Replace entry with minimum value = depth - 8*relative_age
+        // Replace entry with minimum value = depth - 8*relative_age, with small bonuses
         int replaceIdx = base;
         int minValue = Integer.MAX_VALUE;
-        
+
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
             short k = keys[idx];
-            
-            // Empty slot - use immediately
-            if (k == 0) {
+
+            // Empty or cleared slot - use immediately
+            if (k == 0 || bodies[idx] == 0L) {
                 return new ProbeResult(idx, false);
             }
-            
+
             long body = bodies[idx];
             byte abpv = decodeAgeBoundPV(body);
             int entryDepth = decodeDepth(body) & 0xFF;
             int entryAge = ageFromTT(abpv & 0xFF);
             int relativeAge = ((age - entryAge) & AGE_MASK);
-            
-            // Core replacement value: depth - 8 * relative_age
-            // This strongly prefers replacing old entries (8x weight on age)
+
             int value = entryDepth - (relativeAge << 3);
-            
-            // Additional adjustments based on entry quality
+
             short score = decodeScore(body);
             int bound = boundFromTT(abpv & 0xFF);
             boolean wasPv = formerPV(abpv & 0xFF);
-            
-            // Entries with only static eval (no search) are much less valuable
-            if (score == SCORE_VOID) {
-                value -= 8;  // Significant penalty for eval-only entries
-            }
-            
-            // Small adjustments for bound type and PV status
-            // These are intentionally small to not override the age-based replacement
-            if (bound == BOUND_EXACT) {
-                value += 1;  // Exact bounds are slightly more valuable
-            }
-            if (wasPv) {
-                value += 1;  // PV nodes get small protection
-            }
-            
-            // Track entry with minimum value for replacement
+
+            if (score == SCORE_VOID) value -= 8; // less valuable
+            if (bound == BOUND_EXACT) value += 1;
+            if (wasPv) value += 1;
+
             if (value < minValue) {
                 minValue = value;
                 replaceIdx = idx;
             }
         }
-        
+
         return new ProbeResult(replaceIdx, false);
     }
 
