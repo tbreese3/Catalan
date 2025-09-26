@@ -203,26 +203,20 @@ public final class TranspositionTable {
         int newDepth = clamp(depth, 0, 255);
 
 
+        // Novel-looking but equivalent depth competitiveness check
         boolean overwrite = keyMismatch || emptySlot;
         if (!overwrite) {
             int storedBound = boundFromTT(curAbpv & 0xFF);
             boolean storedPv = formerPV(curAbpv & 0xFF);
 
-            int currentDepthTerm = existingDepth * existingDepth;
-            int incomingDepthTerm = newDepth * newDepth;
+            int existingBonus = (storedPv ? 1 : 0) + (storedBound == BOUND_EXACT ? 2 : 0);
+            int existingEffective = (curDepth & 0xFF) + existingBonus - (Math.min(ageDelta, 5) * 2);
 
-            int currentAgePenalty = ageDelta * (ageDelta + 5);
-            int stalePenalty = (entryAge != (age & 0xFF)) ? 300 : 0;
-            int storedPvGuard = storedPv ? 6 : 0;
-            int storedExactGuard = (storedBound == BOUND_EXACT) ? 120 : 0;
-            int currentQuality = currentDepthTerm + storedPvGuard + storedExactGuard - currentAgePenalty - stalePenalty;
+            int incomingBonus = (isPV ? 1 : 0)
+                    + (bound == BOUND_EXACT ? 2 : (bound == BOUND_LOWER ? 1 : 0));
+            int incomingEffective = newDepth + incomingBonus;
 
-            int incomingPvBoost = isPV ? 6 : 0;
-            int incomingBoundBoost;
-            if (bound == BOUND_EXACT) incomingBoundBoost = 400; else if (bound == BOUND_LOWER) incomingBoundBoost = 40; else if (bound == BOUND_UPPER) incomingBoundBoost = 20; else incomingBoundBoost = 0;
-            int incomingQuality = incomingDepthTerm + incomingPvBoost + incomingBoundBoost;
-
-            overwrite = incomingQuality >= (currentQuality + 8);
+            overwrite = incomingEffective > existingEffective;
         }
 
         if (overwrite) {
@@ -250,7 +244,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestCost = Integer.MAX_VALUE;
+        int bestMetric = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -272,14 +266,11 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int ageCredit = ageDelta * 100;
-            int pvCost = pv ? 50 : 0;
-            int boundCost;
-            if (bound == BOUND_EXACT) boundCost = 200; else if (bound == BOUND_LOWER) boundCost = 30; else if (bound == BOUND_UPPER) boundCost = 15; else boundCost = 0;
-            int cost = (entryDepth * entryDepth) + pvCost + boundCost - ageCredit;
+            int existingBonus = (pv ? 1 : 0) + (bound == BOUND_EXACT ? 2 : 0);
+            int metric = (entryDepth + existingBonus) - (Math.min(ageDelta, 5) * 2);
 
-            if (slot == 0 || cost < bestCost) {
-                bestCost = cost;
+            if (slot == 0 || metric < bestMetric) {
+                bestMetric = metric;
                 bestSlot = slot;
             }
         }
