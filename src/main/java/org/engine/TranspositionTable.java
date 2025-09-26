@@ -202,35 +202,30 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Novel lexicographic acceptance using (generation freshness, bound strength, PV flag, depth)
-        boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT);
+        boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int existGenScore;
-            if (entryAge == (age & 0xFF)) existGenScore = 2;
-            else if (ageDelta <= 2) existGenScore = 1;
-            else existGenScore = 0;
+            int incomingWins = 0;
+            int existingWins = 0;
 
-            int existBoundPrio = (existingBound == BOUND_EXACT) ? 3
-                    : (existingBound == BOUND_LOWER) ? 2
-                    : (existingBound == BOUND_UPPER) ? 1 : 0;
-            int incomingBoundPrio = (bound == BOUND_EXACT) ? 3
-                    : (bound == BOUND_LOWER) ? 2
-                    : (bound == BOUND_UPPER) ? 1 : 0;
+            int boundRankExisting = (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
+            int boundRankIncoming = (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            if (boundRankIncoming > boundRankExisting) incomingWins++; else if (boundRankIncoming < boundRankExisting) existingWins++;
 
-            int incomingGenScore = 2; // writing current generation
-            int incomingPv = isPV ? 1 : 0;
-            int existPv = existingPv ? 1 : 0;
+            int pvRankExisting = existingPv ? 1 : 0;
+            int pvRankIncoming = isPV ? 1 : 0;
+            if (pvRankIncoming > pvRankExisting) incomingWins++; else if (pvRankIncoming < pvRankExisting) existingWins++;
 
-            if (incomingGenScore > existGenScore) overwrite = true;
-            else if (incomingGenScore < existGenScore) overwrite = false;
-            else if (incomingBoundPrio > existBoundPrio) overwrite = true;
-            else if (incomingBoundPrio < existBoundPrio) overwrite = false;
-            else if (incomingPv > existPv) overwrite = true;
-            else if (incomingPv < existPv) overwrite = false;
-            else overwrite = newDepth > existingDepth;
+            int margin = 5 - (isPV ? 2 : 0);
+            if (margin < 0) margin = 0;
+            boolean depthCompetitive = (existingDepth - newDepth) < margin;
+            if (depthCompetitive) incomingWins++; else existingWins++;
+
+            if (ageDelta >= 2) incomingWins++;
+
+            overwrite = (incomingWins > existingWins);
         }
 
         if (overwrite) {
@@ -258,8 +253,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int staleShallowSlot = -1;
-        int staleShallowDepth = Integer.MAX_VALUE;
+        int bestCode = Integer.MAX_VALUE;
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -278,34 +272,17 @@ public final class TranspositionTable {
             int entryAge = ageFromTT(abpv & 0xFF);
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
-
-            if (ageDelta >= 3 && entryDepth < staleShallowDepth) {
-                staleShallowDepth = entryDepth;
-                staleShallowSlot = slot;
-            }
-        }
-        if (staleShallowSlot != -1) {
-            return new ProbeResult(base + staleShallowSlot, false);
-        }
-
-        int bestCost = Integer.MAX_VALUE;
-        for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
-            int idx = base + slot;
-            long body = bodies[idx];
-            byte abpv = decodeAgeBoundPV(body);
-            int entryAge = ageFromTT(abpv & 0xFF);
-            int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
-            int entryDepth = decodeDepth(body) & 0xFF;
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            int ageTier = (ageDelta >= 4) ? 3 : (ageDelta >= 2) ? 2 : (ageDelta >= 1) ? 1 : 0;
-            int pvCost = pv ? 3 : 0;
-            int boundCost = (bound == BOUND_EXACT) ? 6 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
-            int cost = entryDepth + pvCost + boundCost - (ageTier * 3);
+            // Priority code (minimize): age first, then bound/PV, then depth
+            int ageTier = (ageDelta >= 6) ? 0 : (ageDelta >= 3) ? 1 : (ageDelta >= 1) ? 2 : 3; // older -> smaller
+            int boundPen = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 1 : 0;
+            int pvPen = pv ? 1 : 0;
+            int code = (ageTier * 1024) + ((boundPen + pvPen) * 64) + (entryDepth & 0xFF);
 
-            if (slot == 0 || cost < bestCost) {
-                bestCost = cost;
+            if (slot == 0 || code < bestCode) {
+                bestCode = code;
                 bestSlot = slot;
             }
         }
