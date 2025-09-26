@@ -202,17 +202,12 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Reference-equivalent overwrite without magic numbers: derived margin and PV relief
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
-            int ageTierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / ageTierSpan);
 
-            int baseMargin = Math.max(1, SLOTS_PER_SET + (MAX_AGE / (SLOTS_PER_SET + 4)));
-            int pvRelief = isPV ? Math.max(1, SLOTS_PER_SET / 2) : 0;
-            int staleRelief = (ageTier >= 2) ? 1 : 0;
-
-            int limit = existingDepth - (baseMargin + pvRelief - staleRelief);
+            int slackBase = Math.max(1, (MAX_AGE >> 2) - SLOTS_PER_SET);
+            int pvRelief = isPV ? Math.max(1, SLOTS_PER_SET - 1) : 0;
+            int limit = existingDepth - (slackBase + pvRelief);
             overwrite = newDepth > limit;
         }
 
@@ -261,10 +256,7 @@ public final class TranspositionTable {
             int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
             int entryDepth = decodeDepth(body) & 0xFF;
 
-            int ageTierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / ageTierSpan);
-            int ageCoeff = SLOTS_PER_SET + ageTier; // derived multiplier for age impact
-
+            int ageCoeff = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 5));
             int metric = (entryDepth & 0xFF) - (ageDelta * ageCoeff);
             if (slot == 0 || metric < bestMetric) {
                 bestMetric = metric;
