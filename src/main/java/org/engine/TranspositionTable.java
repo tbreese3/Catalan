@@ -198,27 +198,30 @@ public final class TranspositionTable {
         int adjScore = (score == SCORE_VOID) ? SCORE_VOID : scoreToTT(score, ply);
 
         int entryAge = ageFromTT(curAbpv & 0xFF);
+        int ageDelta = (MAX_AGE + (age & 0xFF) - entryAge) & AGE_MASK;
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Replacement policy tuned for high occupancy:
-        // - Always replace on collision or empty slot
-        // - Replace if different generation (stale)
-        // - For same-key same-generation: replace only if deeper, or exact and not much shallower
+        int existingBound = boundFromTT(curAbpv & 0xFF);
+        boolean existingPv = formerPV(curAbpv & 0xFF);
+        int curAge = (age & 0xFF);
+
         boolean replace;
-        if (emptySlot || keyMismatch || (entryAge != (age & 0xFF))) {
+        if (emptySlot || keyMismatch) {
             replace = true;
+        } else if (entryAge != curAge) {
+            replace = true;
+        } else if (bound == BOUND_EXACT) {
+            replace = newDepth + 1 >= existingDepth;
+        } else if (existingBound == BOUND_EXACT) {
+            replace = newDepth >= existingDepth + 2;
         } else {
-            // Same key and current generation
-            if (bound == BOUND_EXACT) {
-                replace = newDepth >= Math.max(0, existingDepth - 2);
-            } else {
-                replace = newDepth >= existingDepth;
-            }
+            replace = (newDepth > existingDepth) || (newDepth == existingDepth && isPV && !existingPv);
         }
 
         if (replace) {
-            byte newAbpv = (byte) packToTT(bound, isPV, age & 0xFF);
+            boolean stickPV = isPV || (!keyMismatch && entryAge == curAge && formerPV(curAbpv & 0xFF));
+            byte newAbpv = (byte) packToTT(bound, stickPV, age & 0xFF);
             long newBody = encodeBody(
                     newPackedMove,
                     (short) clamp(adjScore, Short.MIN_VALUE, Short.MAX_VALUE),
@@ -264,12 +267,11 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Replacement heuristic tuned for high occupancy:
-            // Strongly prefer replacing older generations, then UPPER > LOWER > EXACT, then shallow, then non-PV
-            int boundPenalty;
-            if (bound == BOUND_EXACT) boundPenalty = 1024; else if (bound == BOUND_LOWER) boundPenalty = 256; else boundPenalty = 0;
-            int pvPenalty = pv ? 512 : 0;
-            int score = (ageDelta << 12) - (entryDepth << 6) - boundPenalty - pvPenalty;
+            int ageWeight = ageDelta * ageDelta * 9;
+            int depthWeight = entryDepth * entryDepth;
+            int boundPenalty = (bound == BOUND_EXACT) ? 1600 : (bound == BOUND_LOWER ? 240 : 0);
+            int pvPenalty = pv ? 700 : 0;
+            int score = ageWeight - depthWeight - boundPenalty - pvPenalty;
             if (score > replaceScore) {
                 replaceScore = score;
                 replaceSlot = slot;
