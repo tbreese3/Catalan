@@ -202,37 +202,45 @@ public final class TranspositionTable {
         int existingDepth = curDepth & 0xFF;
         int newDepth = clamp(depth, 0, 255);
 
-        // Stickiness vs Pressure overwrite (novel, derived weights, single-pass)
+        // Permutation-based lexicographic overwrite (novel, derived, single-pass)
         boolean overwrite = keyMismatch || emptySlot || (bound == BOUND_EXACT) || (entryAge != (age & 0xFF));
         if (!overwrite) {
             int existingBound = boundFromTT(curAbpv & 0xFF);
             boolean existingPv = formerPV(curAbpv & 0xFF);
 
-            int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int ageTier = Math.min(3, ageDelta / tierSpan); // 0..3, older -> higher tier
+            int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 1));
+            boolean existingStale = ageDelta >= tierSpan;
 
-            int boundRankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
-            int boundRankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
+            int rankExisting = (existingBound == BOUND_EXACT) ? 3 : (existingBound == BOUND_LOWER) ? 2 : (existingBound == BOUND_UPPER) ? 1 : 0;
+            int rankIncoming = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            // Derived weights
-            int depthW = SLOTS_PER_SET + 1;
-            int boundW = SLOTS_PER_SET + Math.max(1, MAX_AGE / (SLOTS_PER_SET + 3));
-            int pvW = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 4));
-            int freshW = SLOTS_PER_SET; // fresher entries are stickier
+            boolean betterFresh = existingStale;
+            boolean betterBound = rankIncoming > rankExisting;
+            boolean betterPv = isPV && !existingPv;
+            boolean betterDepth = newDepth > existingDepth;
 
-            int stickiness = (existingDepth * depthW)
-                    + (boundRankExisting * boundW)
-                    + (existingPv ? pvW : 0)
-                    + ((3 - ageTier) * freshW);
-
-            int pressure = (newDepth * depthW)
-                    + (boundRankIncoming * boundW)
-                    + (isPV ? pvW : 0);
-
-            int saltMask = (SLOTS_PER_SET << 1) | 1;
-            int salt = (((int) (index(key) ^ (key >>> 32))) & saltMask) - (saltMask >> 1);
-
-            overwrite = (pressure - stickiness) > salt;
+            int perm = (int) ((key ^ (key >>> 32)) % 6);
+            if (perm < 0) perm += 6;
+            switch (perm) {
+                case 0: // freshness -> bound -> pv -> depth
+                    overwrite = betterFresh || (betterBound || (!betterBound && betterPv) || (!betterBound && !betterPv && betterDepth));
+                    break;
+                case 1: // bound -> pv -> depth -> freshness
+                    overwrite = betterBound || (!betterBound && (betterPv || (!betterPv && (betterDepth || (!betterDepth && betterFresh)))));
+                    break;
+                case 2: // pv -> depth -> freshness -> bound
+                    overwrite = betterPv || (!betterPv && (betterDepth || (!betterDepth && (betterFresh || (!betterFresh && betterBound)))));
+                    break;
+                case 3: // depth -> freshness -> bound -> pv
+                    overwrite = betterDepth || (!betterDepth && (betterFresh || (!betterFresh && (betterBound || (!betterBound && betterPv)))));
+                    break;
+                case 4: // bound -> freshness -> depth -> pv
+                    overwrite = betterBound || (!betterBound && (betterFresh || (!betterFresh && (betterDepth || (!betterDepth && betterPv)))));
+                    break;
+                default: // pv -> bound -> freshness -> depth
+                    overwrite = betterPv || (!betterPv && (betterBound || (!betterBound && (betterFresh || (!betterFresh && betterDepth)))));
+                    break;
+            }
         }
 
         if (overwrite) {
@@ -260,7 +268,7 @@ public final class TranspositionTable {
         int wantKey = (int) (key & 0xFFFFL);
 
         int bestSlot = 0;
-        int bestMetric = Integer.MIN_VALUE; // maximize priority
+        int bestScore = Integer.MIN_VALUE; // maximize geometric-boosted priority
 
         for (int slot = 0; slot < SLOTS_PER_SET; slot++) {
             int idx = base + slot;
@@ -282,19 +290,21 @@ public final class TranspositionTable {
             int bound = boundFromTT(abpv & 0xFF);
             boolean pv = formerPV(abpv & 0xFF);
 
-            // Triangular-age priority (derived weights), maximize priority
-            int ageTri = (ageDelta * (ageDelta + 1)) / 2;
-            int ageW = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 2));
-            int depthInvScale = (SLOTS_PER_SET + 3) * 64;
-            int depthInv = depthInvScale / (entryDepth + 1);
-            int pvPen = Math.max(1, SLOTS_PER_SET - 1);
-            int boundPenUnit = SLOTS_PER_SET;
+            int tierSpan = Math.max(1, MAX_AGE / (SLOTS_PER_SET + 1));
+            int ageTier = Math.min(3, ageDelta / tierSpan);
+            int ageGeom = (1 << ageTier) * Math.max(1, MAX_AGE / (SLOTS_PER_SET + 3)); // geometric reward for staleness
+
+            int depthPenalty = (entryDepth * (SLOTS_PER_SET + 1));
+            int pvPenalty = Math.max(1, SLOTS_PER_SET - 1);
+            int boundPenaltyUnit = SLOTS_PER_SET;
             int boundRank = (bound == BOUND_EXACT) ? 3 : (bound == BOUND_LOWER) ? 2 : (bound == BOUND_UPPER) ? 1 : 0;
 
-            int priority = (ageTri * ageW) + depthInv - (pv ? pvPen : 0) - (boundRank * boundPenUnit);
+            int salt = (int) ((key ^ (key >>> 32) ^ base ^ slot) & ((SLOTS_PER_SET << 1) | 1));
 
-            if (slot == 0 || priority > bestMetric) {
-                bestMetric = priority;
+            int score = ageGeom - depthPenalty - (pv ? pvPenalty : 0) - (boundRank * boundPenaltyUnit) + salt;
+
+            if (slot == 0 || score > bestScore) {
+                bestScore = score;
                 bestSlot = slot;
             }
         }
