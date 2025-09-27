@@ -1,13 +1,14 @@
 package org.engine;
 
+import static org.engine.PositionFactory.*;
+
 /**
- * Static Exchange Evaluation (SEE) implementation for pruning bad captures in quiescence search.
- * SEE evaluates the outcome of a series of exchanges on a given square.
+ * Static Exchange Evaluation (SEE) for pruning bad captures in quiescence search.
+ * This implementation leverages the existing MoveGenerator attack generation.
  */
 public final class SEE {
     
-    // Standard piece values in centipawns for SEE calculation
-    // Using typical values: Pawn=100, Knight=320, Bishop=330, Rook=500, Queen=900, King=20000
+    // Piece values in centipawns for SEE calculation  
     private static final int[] PIECE_VALUES = {
         100,   // WP = 0
         320,   // WN = 1  
@@ -23,14 +24,9 @@ public final class SEE {
         20000  // BK = 11
     };
     
-    // Piece attack directions for sliding pieces
-    private static final int[][] ROOK_DIRECTIONS = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
-    private static final int[][] BISHOP_DIRECTIONS = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-    private static final int[][] QUEEN_DIRECTIONS = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-    private static final int[][] KNIGHT_MOVES = {{2, 1}, {2, -1}, {-2, 1}, {-2, -1}, {1, 2}, {1, -2}, {-1, 2}, {-1, -2}};
-    private static final int[][] KING_MOVES = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+    private static final MoveGenerator moveGen = new MoveGenerator();
     
-    private SEE() {} // Utility class, no instantiation
+    private SEE() {} // Utility class
     
     /**
      * Evaluates whether a capture is likely to be good using Static Exchange Evaluation.
@@ -54,8 +50,7 @@ public final class SEE {
         int targetPiece;
         if (flags == MoveFactory.FLAG_EN_PASSANT) {
             // En passant captures a pawn
-            boolean white = PositionFactory.whiteToMove(board);
-            targetPiece = white ? PositionFactory.BP : PositionFactory.WP;
+            targetPiece = movingPiece < 6 ? BP : WP;
         } else {
             targetPiece = PositionFactory.pieceAt(board, to);
             if (targetPiece == -1) return true; // Not a capture, assume good
@@ -71,36 +66,38 @@ public final class SEE {
             gain += PIECE_VALUES[promoPiece] - PIECE_VALUES[movingPiece];
         }
         
-        // If the initial gain is already below threshold minus our piece value, it's bad
+        // If initial gain minus our piece value is already below threshold, it's bad
         if (gain - PIECE_VALUES[movingPiece] < threshold) {
             return false;
         }
         
-        // Simulate the capture
-        long allPieces = getAllPieces(board);
-        allPieces &= ~(1L << from); // Remove attacker
+        // Get all pieces
+        long occ = board[WP] | board[WN] | board[WB] | board[WR] | board[WQ] | board[WK] |
+                   board[BP] | board[BN] | board[BB] | board[BR] | board[BQ] | board[BK];
+        
+        // Remove the initial attacker
+        occ &= ~(1L << from);
+        
+        // Handle en passant victim removal
         if (flags == MoveFactory.FLAG_EN_PASSANT) {
-            // Remove the en passant victim
             int epVictimSq = (movingPiece < 6) ? to - 8 : to + 8;
-            allPieces &= ~(1L << epVictimSq);
+            occ &= ~(1L << epVictimSq);
         }
         
-        // Find all attackers to the target square
-        long attackers = getAttackers(board, to, allPieces);
-        
-        // Remove the initial attacker from the attacker set
-        attackers &= ~(1L << from);
-        
-        // Determine which side moves next (opposite of the side that just moved)
-        boolean stm = !(movingPiece < 6); // Side to move after the capture
-        
-        // The piece on the target square after the initial capture
+        // The piece on the target square after initial capture
         int pieceOnTarget = (flags == MoveFactory.FLAG_PROMOTION) ? 
             getPromotedPiece(movingPiece < 6, promo) : movingPiece;
         
+        // Side to move after the initial capture
+        boolean stm = !(movingPiece < 6);
+        
         // Perform static exchange evaluation
-        while (attackers != 0) {
-            // Find the least valuable attacker for the side to move
+        while (true) {
+            // Find all attackers to the target square
+            long attackers = getAttackers(board, occ, to, !stm);
+            if (attackers == 0) break;
+            
+            // Find the least valuable attacker
             int leastValuableAttacker = findLeastValuableAttacker(board, attackers, stm);
             if (leastValuableAttacker == -1) break;
             
@@ -108,18 +105,17 @@ public final class SEE {
             gain = -gain + PIECE_VALUES[pieceOnTarget];
             pieceOnTarget = leastValuableAttacker;
             
-            // If it's our turn and the gain is already negative, we won't make this capture
+            // If it's our turn and the gain is negative, we won't make this capture
             if (stm == (movingPiece < 6) && gain < threshold) {
                 return false;
             }
             
-            // Remove the attacker
-            int attackerSq = Long.numberOfTrailingZeros(attackers & getPieceBitboard(board, leastValuableAttacker));
-            attackers &= ~(1L << attackerSq);
-            allPieces &= ~(1L << attackerSq);
+            // Remove the attacker and handle x-ray attacks
+            int attackerSq = Long.numberOfTrailingZeros(attackers & board[leastValuableAttacker]);
+            occ &= ~(1L << attackerSq);
             
-            // Add any X-ray attackers
-            attackers |= getXrayAttackers(board, to, allPieces, attackerSq);
+            // Add x-ray attackers by updating occupation
+            // This is handled automatically by getAttackers in the next iteration
             
             // Switch sides
             stm = !stm;
@@ -129,100 +125,32 @@ public final class SEE {
     }
     
     /**
-     * Get all pieces on the board as a bitboard
+     * Get all attackers to a given square using MoveGenerator's existing logic
      */
-    private static long getAllPieces(long[] board) {
-        long allPieces = 0;
-        for (int i = PositionFactory.WP; i <= PositionFactory.BK; i++) {
-            allPieces |= board[i];
-        }
-        return allPieces;
-    }
-    
-    /**
-     * Get all attackers to a given square
-     */
-    private static long getAttackers(long[] board, int square, long occupied) {
+    private static long getAttackers(long[] board, long occ, int sq, boolean byWhite) {
         long attackers = 0;
-        int rank = square >>> 3;
-        int file = square & 7;
         
-        // Check pawn attacks
-        if (rank > 0) {
-            if (file > 0 && ((board[PositionFactory.WP] >>> (square - 9)) & 1) != 0) {
-                attackers |= 1L << (square - 9);
-            }
-            if (file < 7 && ((board[PositionFactory.WP] >>> (square - 7)) & 1) != 0) {
-                attackers |= 1L << (square - 7);
-            }
-        }
-        if (rank < 7) {
-            if (file > 0 && ((board[PositionFactory.BP] >>> (square + 7)) & 1) != 0) {
-                attackers |= 1L << (square + 7);
-            }
-            if (file < 7 && ((board[PositionFactory.BP] >>> (square + 9)) & 1) != 0) {
-                attackers |= 1L << (square + 9);
-            }
+        // Pawn attacks
+        long sqBit = 1L << sq;
+        if (byWhite) {
+            attackers |= board[WP] & (((sqBit & ~MoveGenerator.FILE_H) >>> 7) | ((sqBit & ~MoveGenerator.FILE_A) >>> 9));
+        } else {
+            attackers |= board[BP] & (((sqBit & ~MoveGenerator.FILE_H) << 9) | ((sqBit & ~MoveGenerator.FILE_A) << 7));
         }
         
-        // Check knight attacks
-        for (int[] move : KNIGHT_MOVES) {
-            int newRank = rank + move[0];
-            int newFile = file + move[1];
-            if (newRank >= 0 && newRank < 8 && newFile >= 0 && newFile < 8) {
-                int sq = newRank * 8 + newFile;
-                if (((board[PositionFactory.WN] | board[PositionFactory.BN]) >>> sq) & 1) {
-                    attackers |= 1L << sq;
-                }
-            }
-        }
+        // Knight attacks
+        attackers |= MoveGenerator.KNIGHT_ATK[sq] & (byWhite ? board[WN] : board[BN]);
         
-        // Check sliding piece attacks (bishops, rooks, queens)
-        for (int[] dir : BISHOP_DIRECTIONS) {
-            int r = rank + dir[0];
-            int f = file + dir[1];
-            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
-                int sq = r * 8 + f;
-                if ((occupied >>> sq) & 1) {
-                    if (((board[PositionFactory.WB] | board[PositionFactory.BB] | 
-                          board[PositionFactory.WQ] | board[PositionFactory.BQ]) >>> sq) & 1) {
-                        attackers |= 1L << sq;
-                    }
-                    break;
-                }
-                r += dir[0];
-                f += dir[1];
-            }
-        }
+        // Bishop/Queen attacks
+        long bishopAttacks = MoveGenerator.bishopAtt(occ, sq);
+        attackers |= bishopAttacks & (byWhite ? (board[WB] | board[WQ]) : (board[BB] | board[BQ]));
         
-        for (int[] dir : ROOK_DIRECTIONS) {
-            int r = rank + dir[0];
-            int f = file + dir[1];
-            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
-                int sq = r * 8 + f;
-                if ((occupied >>> sq) & 1) {
-                    if (((board[PositionFactory.WR] | board[PositionFactory.BR] | 
-                          board[PositionFactory.WQ] | board[PositionFactory.BQ]) >>> sq) & 1) {
-                        attackers |= 1L << sq;
-                    }
-                    break;
-                }
-                r += dir[0];
-                f += dir[1];
-            }
-        }
+        // Rook/Queen attacks
+        long rookAttacks = MoveGenerator.rookAtt(occ, sq);
+        attackers |= rookAttacks & (byWhite ? (board[WR] | board[WQ]) : (board[BR] | board[BQ]));
         
-        // Check king attacks
-        for (int[] move : KING_MOVES) {
-            int newRank = rank + move[0];
-            int newFile = file + move[1];
-            if (newRank >= 0 && newRank < 8 && newFile >= 0 && newFile < 8) {
-                int sq = newRank * 8 + newFile;
-                if (((board[PositionFactory.WK] | board[PositionFactory.BK]) >>> sq) & 1) {
-                    attackers |= 1L << sq;
-                }
-            }
-        }
+        // King attacks
+        attackers |= MoveGenerator.KING_ATK[sq] & (byWhite ? board[WK] : board[BK]);
         
         return attackers;
     }
@@ -232,78 +160,29 @@ public final class SEE {
      */
     private static int findLeastValuableAttacker(long[] board, long attackers, boolean white) {
         // Check pieces in order of increasing value
-        int[] pieceOrder = white ? 
-            new int[]{PositionFactory.WP, PositionFactory.WN, PositionFactory.WB, 
-                      PositionFactory.WR, PositionFactory.WQ, PositionFactory.WK} :
-            new int[]{PositionFactory.BP, PositionFactory.BN, PositionFactory.BB, 
-                      PositionFactory.BR, PositionFactory.BQ, PositionFactory.BK};
-        
-        for (int piece : pieceOrder) {
-            if ((attackers & board[piece]) != 0) {
-                return piece;
-            }
+        if (white) {
+            if ((attackers & board[WP]) != 0) return WP;
+            if ((attackers & board[WN]) != 0) return WN;
+            if ((attackers & board[WB]) != 0) return WB;
+            if ((attackers & board[WR]) != 0) return WR;
+            if ((attackers & board[WQ]) != 0) return WQ;
+            if ((attackers & board[WK]) != 0) return WK;
+        } else {
+            if ((attackers & board[BP]) != 0) return BP;
+            if ((attackers & board[BN]) != 0) return BN;
+            if ((attackers & board[BB]) != 0) return BB;
+            if ((attackers & board[BR]) != 0) return BR;
+            if ((attackers & board[BQ]) != 0) return BQ;
+            if ((attackers & board[BK]) != 0) return BK;
         }
-        
         return -1;
-    }
-    
-    /**
-     * Get the bitboard for a specific piece type
-     */
-    private static long getPieceBitboard(long[] board, int piece) {
-        return board[piece];
-    }
-    
-    /**
-     * Get X-ray attackers that are revealed after a piece moves
-     */
-    private static long getXrayAttackers(long[] board, int target, long occupied, int movedFrom) {
-        long xrayAttackers = 0;
-        int rank = target >>> 3;
-        int file = target & 7;
-        int fromRank = movedFrom >>> 3;
-        int fromFile = movedFrom & 7;
-        
-        // Check if the moved piece was blocking a sliding attacker
-        int dr = Integer.signum(rank - fromRank);
-        int df = Integer.signum(file - fromFile);
-        
-        if (dr != 0 || df != 0) {
-            // Continue in the same direction to find X-ray attackers
-            int r = fromRank + dr;
-            int f = fromFile + df;
-            
-            while (r >= 0 && r < 8 && f >= 0 && f < 8) {
-                int sq = r * 8 + f;
-                if ((occupied >>> sq) & 1) {
-                    // Check if this is a relevant sliding piece
-                    boolean isDiagonal = (dr != 0 && df != 0);
-                    if (isDiagonal) {
-                        if (((board[PositionFactory.WB] | board[PositionFactory.BB] | 
-                              board[PositionFactory.WQ] | board[PositionFactory.BQ]) >>> sq) & 1) {
-                            xrayAttackers |= 1L << sq;
-                        }
-                    } else {
-                        if (((board[PositionFactory.WR] | board[PositionFactory.BR] | 
-                              board[PositionFactory.WQ] | board[PositionFactory.BQ]) >>> sq) & 1) {
-                            xrayAttackers |= 1L << sq;
-                        }
-                    }
-                    break;
-                }
-                r += dr;
-                f += df;
-            }
-        }
-        
-        return xrayAttackers;
     }
     
     /**
      * Get the promoted piece type
      */
     private static int getPromotedPiece(boolean white, int promotionType) {
-        int base = white ? PositionFactory.WN : PositionFactory.BN;
+        int base = white ? WN : BN;
         return base + promotionType; // N=0, B=1, R=2, Q=3
     }
 }
