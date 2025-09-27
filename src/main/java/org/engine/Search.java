@@ -110,6 +110,9 @@ public final class Search {
 		}
 	}
 
+	private static final int RFP_MAX_DEPTH = 3;
+	private static final int RFP_MARGIN_PER_DEPTH = 128;
+
 	public void stop() {
 		stopRequested = true;
 	}
@@ -261,6 +264,16 @@ public final class Search {
             }
             se.staticEval = rawEval;
         }
+
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= RFP_MAX_DEPTH) {
+			if (pos.hasNonPawnMaterialForSTM(board)) {
+				int eval = se.staticEval != SCORE_NONE ? se.staticEval : evaluate(board);
+				int margin = RFP_MARGIN_PER_DEPTH * depth;
+				if (Math.abs(beta) < MATE_VALUE && eval - margin >= beta) {
+					return eval - margin;
+				}
+			}
+		}
 
 		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
