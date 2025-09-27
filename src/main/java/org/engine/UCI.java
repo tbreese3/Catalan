@@ -14,7 +14,8 @@ public class UCI {
 
     private final PositionFactory pos = new PositionFactory();
     private final long[] board = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"); // replaced on position commands
-    private final Search search = new Search();
+    private final SPSA spsa = new SPSA();
+    private Search search = new Search(spsa);
     private final TimeManager timeManager = new TimeManager();
     private Thread searchThread;
 
@@ -33,15 +34,26 @@ public class UCI {
             if (line.equals("uci")) {
                 System.out.println("id name Catalan");
                 System.out.println("id author Tyler Breese");
+                System.out.println("option name NMPBase type spin default 2 min 0 max 10");
+                System.out.println("option name NMPDepthScale100 type spin default 25 min 0 max 200");
+                System.out.println("option name NMPEvalMargin type spin default 200 min 1 max 4000");
+                System.out.println("option name NMPEvalMax type spin default 3 min 0 max 10");
+                System.out.println("option name LMRBase100 type spin default 75 min 0 max 300");
+                System.out.println("option name LMRDivisor100 type spin default 225 min 1 max 1000");
+                System.out.println("option name FUTMaxDepth type spin default 3 min 0 max 8");
+                System.out.println("option name FUTMarginPerDepth type spin default 128 min 0 max 1024");
+                System.out.println("option name QSeeMargin type spin default 0 min 0 max 1024");
                 System.out.println("uciok");
             } else if (line.equals("isready")) {
                 System.out.println("readyok");
             } else if (line.startsWith("setoption")) {
-                // Ignored for now
+                handleSetOption(line);
             } else if (line.equals("ucinewgame")) {
                 long[] fresh = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 System.arraycopy(fresh, 0, board, 0, fresh.length);
                 TranspositionTable.TT.clear();
+                // Recreate search with current SPSA tunables so finals are re-captured
+                search = new Search(spsa);
             } else if (line.startsWith("position")) {
                 handlePosition(line);
             } else if (line.startsWith("go")) {
@@ -52,6 +64,48 @@ public class UCI {
                 stopSearch();
                 break;
             }
+        }
+    }
+
+    private void handleSetOption(String cmd) {
+        // Syntax: setoption name <name> [value <val>]
+        String name = null;
+        String value = null;
+        StringTokenizer st = new StringTokenizer(cmd);
+        st.nextToken(); // setoption
+        while (st.hasMoreTokens()) {
+            String t = st.nextToken();
+            if ("name".equals(t) && st.hasMoreTokens()) {
+                // Collect name possibly with spaces until we hit "value" or end
+                StringBuilder nb = new StringBuilder();
+                while (st.hasMoreTokens()) {
+                    String peek = st.nextToken();
+                    if ("value".equals(peek)) {
+                        break;
+                    }
+                    if (nb.length() > 0) nb.append(' ');
+                    nb.append(peek);
+                }
+                name = nb.toString();
+                // If we broke on value, continue loop to read its value
+                if (name.endsWith(" value")) {
+                    name = name.substring(0, name.length() - 6).trim();
+                }
+            }
+            if ("value".equals(t) && st.hasMoreTokens()) {
+                value = st.nextToken(""); // rest of line
+                if (value != null) value = value.trim();
+                break;
+            }
+        }
+
+        if (name == null || value == null) return;
+        try {
+            int intVal = Integer.parseInt(value.trim());
+            spsa.setByName(name, intVal);
+            // Do not touch existing search; params will take effect on next ucinewgame
+        } catch (Exception ignored) {
+            // non-integer values are ignored for these options
         }
     }
 
