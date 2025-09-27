@@ -286,21 +286,12 @@ public final class Search {
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
-			int flagsLMR = MoveFactory.GetFlags(move);
-			boolean isEP = (flagsLMR == MoveFactory.FLAG_EN_PASSANT);
-			int toSqLMR = MoveFactory.GetTo(move);
-			int targetPieceLMR = isEP ? (PositionFactory.whiteToMove(board) ? 6 : 0) : PositionFactory.pieceAt(board, toSqLMR);
-			boolean isCaptureLMR = isEP || (targetPieceLMR != -1);
-			boolean isPromotionLMR = (flagsLMR == MoveFactory.FLAG_PROMOTION);
-			boolean isCastleLMR = (flagsLMR == MoveFactory.FLAG_CASTLE);
-			boolean isQuietLMR = !isCaptureLMR && !isPromotionLMR && !isCastleLMR;
-
 			// Late Move Reductions
 			int searchDepthChild = depth - 1;
 			int appliedReduction = 0;
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
-			if (!se.inCheck && !childPv && isQuietLMR && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+			if (!se.inCheck && !childPv && PositionFactory.isQuiet(board, move) && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = LMR_TABLE[dIdx][mIdx];
@@ -352,18 +343,7 @@ public final class Search {
 			}
 
 			if (alpha >= beta) {
-				int flags = MoveFactory.GetFlags(move);
-				boolean isCapture;
-				if (flags == MoveFactory.FLAG_EN_PASSANT) {
-					isCapture = true;
-				} else {
-					int to = MoveFactory.GetTo(move);
-					int targetPiece = PositionFactory.pieceAt(board, to);
-					isCapture = targetPiece != -1;
-				}
-				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
-				boolean isCastle = (flags == MoveFactory.FLAG_CASTLE);
-				if (!isCapture && !isPromotion && !isCastle) {
+				if (PositionFactory.isQuiet(board, move)) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
 					// History update on quiet fail-high
