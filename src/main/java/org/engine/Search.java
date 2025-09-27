@@ -463,16 +463,15 @@ public final class Search {
 		for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
 
+			// SEE pruning: skip clearly bad captures in qsearch when not in check
 			if (!inCheck) {
 				int flagsSEE = MoveFactory.GetFlags(move);
-				int toSEE = MoveFactory.GetTo(move);
-				boolean isCaptureSEE = (flagsSEE == MoveFactory.FLAG_EN_PASSANT) || (PositionFactory.pieceAt(board, toSEE) != -1);
-				boolean isPromotionSEE = (flagsSEE == MoveFactory.FLAG_PROMOTION);
-				if ((isCaptureSEE || isPromotionSEE) && move != ttMoveForQ) {
-					int seeGain = SEE.see(board, move);
-					if (seeGain < 0) {
-						continue;
-					}
+				boolean isEP_SEE = (flagsSEE == MoveFactory.FLAG_EN_PASSANT);
+				int toSqSEE = MoveFactory.GetTo(move);
+				int targetPieceSEE = isEP_SEE ? (PositionFactory.whiteToMove(board) ? 6 : 0) : PositionFactory.pieceAt(board, toSqSEE);
+				boolean isCaptureSEE = isEP_SEE || (targetPieceSEE != -1);
+				if (isCaptureSEE && SEE.isBadCapture(board, move)) {
+					continue;
 				}
 			}
 

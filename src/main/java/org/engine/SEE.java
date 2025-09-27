@@ -2,169 +2,219 @@ package org.engine;
 
 final class SEE {
 
-    private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
+	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 
-    private SEE() {}
+	static int seeCapture(long[] bb, int move) {
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int flags = MoveFactory.GetFlags(move);
+		int promo = MoveFactory.GetPromotion(move);
 
-    static int see(long[] bb, int move) {
-        int from = MoveFactory.GetFrom(move);
-        int to = MoveFactory.GetTo(move);
-        int flags = MoveFactory.GetFlags(move);
+		boolean usWhite = PositionFactory.whiteToMove(bb);
 
-        int promoGain = 0;
-        if (flags == MoveFactory.FLAG_PROMOTION) {
-            int promo = MoveFactory.GetPromotion(move) & 3;
-            int promoPieceIndex = promoToPieceIndex(bb, from, promo);
-            int pawnIndex = pawnIndexAtSquare(bb, from);
-            if (promoPieceIndex != -1 && pawnIndex != -1) {
-                promoGain = PIECE_VALUES[promoPieceIndex] - PIECE_VALUES[pawnIndex];
-            }
-        }
+		int mover = PositionFactory.pieceAt(bb, from);
+		if (mover == -1) mover = usWhite ? PositionFactory.WP : PositionFactory.BP;
 
-        int victimPieceIndex;
-        if (flags == MoveFactory.FLAG_EN_PASSANT) {
-            boolean white = PositionFactory.whiteToMove(bb);
-            victimPieceIndex = white ? PositionFactory.BP : PositionFactory.WP;
-        } else {
-            victimPieceIndex = PositionFactory.pieceAt(bb, to);
-        }
+		int victimIdx;
+		boolean isEP = (flags == MoveFactory.FLAG_EN_PASSANT);
+		if (isEP) {
+			victimIdx = usWhite ? PositionFactory.BP : PositionFactory.WP;
+		} else {
+			victimIdx = PositionFactory.pieceAt(bb, to);
+			if (victimIdx == -1) return 0; // not a capture
+		}
 
-        if (victimPieceIndex == -1 && flags != MoveFactory.FLAG_EN_PASSANT) {
-            return promoGain;
-        }
+		int victimVal = PIECE_VALUES[victimIdx];
+		if (victimVal <= 0) return 0;
 
-        int attackerPieceIndex = PositionFactory.pieceAt(bb, from);
-        if (attackerPieceIndex == -1) attackerPieceIndex = PositionFactory.whiteToMove(bb) ? PositionFactory.WP : PositionFactory.BP;
+		long wp = bb[PositionFactory.WP];
+		long wn = bb[PositionFactory.WN];
+		long wb = bb[PositionFactory.WB];
+		long wr = bb[PositionFactory.WR];
+		long wq = bb[PositionFactory.WQ];
+		long wk = bb[PositionFactory.WK];
+		long bp = bb[PositionFactory.BP];
+		long bn = bb[PositionFactory.BN];
+		long bbB = bb[PositionFactory.BB];
+		long br = bb[PositionFactory.BR];
+		long bq = bb[PositionFactory.BQ];
+		long bk = bb[PositionFactory.BK];
 
-        long whiteAll = bb[PositionFactory.WP]|bb[PositionFactory.WN]|bb[PositionFactory.WB]|bb[PositionFactory.WR]|bb[PositionFactory.WQ]|bb[PositionFactory.WK];
-        long blackAll = bb[PositionFactory.BP]|bb[PositionFactory.BN]|bb[PositionFactory.BB]|bb[PositionFactory.BR]|bb[PositionFactory.BQ]|bb[PositionFactory.BK];
-        long occ = whiteAll | blackAll;
+		long occ = (wp|wn|wb|wr|wq|wk|bp|bn|bbB|br|bq|bk);
 
-        boolean stmWhite = attackerPieceIndex < 6;
+		int[] gain = new int[128];
+		int depth = 0;
+		gain[depth] = victimVal;
 
-        long[] atksBySide = new long[2];
-        atksBySide[0] = attackersTo(bb, occ, to, true);
-        atksBySide[1] = attackersTo(bb, occ, to, false);
+		int lastPieceVal;
+		if (flags == MoveFactory.FLAG_PROMOTION) {
+			int promotedIdx = (usWhite ? PositionFactory.WN : PositionFactory.BN) + (promo & 3);
+			lastPieceVal = PIECE_VALUES[promotedIdx];
+		} else {
+			lastPieceVal = PIECE_VALUES[mover];
+		}
 
-        long fromBit = 1L << from;
-        long toBit = 1L << to;
+		// Perform the first capture: remove mover from its square, place on 'to'.
+		int fromSq = from;
+		if (mover == PositionFactory.WP) wp &= ~(1L << fromSq);
+		else if (mover == PositionFactory.WN) wn &= ~(1L << fromSq);
+		else if (mover == PositionFactory.WB) wb &= ~(1L << fromSq);
+		else if (mover == PositionFactory.WR) wr &= ~(1L << fromSq);
+		else if (mover == PositionFactory.WQ) wq &= ~(1L << fromSq);
+		else if (mover == PositionFactory.WK) wk &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BP) bp &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BN) bn &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BB) bbB &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BR) br &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BQ) bq &= ~(1L << fromSq);
+		else if (mover == PositionFactory.BK) bk &= ~(1L << fromSq);
 
-        if (flags == MoveFactory.FLAG_EN_PASSANT) {
-            int capSq = stmWhite ? (to - 8) : (to + 8);
-            occ &= ~(1L << capSq);
-            if (stmWhite) blackAll &= ~(1L << capSq); else whiteAll &= ~(1L << capSq);
-        }
+		long toBit = 1L << to;
+		long fromBit = 1L << fromSq;
+		occ &= ~fromBit; // from becomes empty
 
-        occ ^= fromBit;
+		// For en passant, also remove the pawn behind 'to'
+		if (isEP) {
+			int capSq = usWhite ? (to - 8) : (to + 8);
+			long capBit = 1L << capSq;
+			if (usWhite) bp &= ~capBit; else wp &= ~capBit;
+			occ &= ~capBit;
+		}
 
-        int[] gains = new int[64];
-        int depth = 0;
-        int side = stmWhite ? 0 : 1;
+		// Now 'to' is occupied by the mover piece
+		if (mover < 6) {
+			if (flags == MoveFactory.FLAG_PROMOTION) {
+				int promIdx = PositionFactory.WN + (promo & 3);
+				if (promIdx == PositionFactory.WN) wn |= toBit;
+				else if (promIdx == PositionFactory.WB) wb |= toBit;
+				else if (promIdx == PositionFactory.WR) wr |= toBit;
+				else wq |= toBit;
+			} else {
+				if (mover == PositionFactory.WP) wp |= toBit;
+				else if (mover == PositionFactory.WN) wn |= toBit;
+				else if (mover == PositionFactory.WB) wb |= toBit;
+				else if (mover == PositionFactory.WR) wr |= toBit;
+				else if (mover == PositionFactory.WQ) wq |= toBit;
+				else wk |= toBit;
+			}
+		} else {
+			if (mover == PositionFactory.BP) bp |= toBit;
+			else if (mover == PositionFactory.BN) bn |= toBit;
+			else if (mover == PositionFactory.BB) bbB |= toBit;
+			else if (mover == PositionFactory.BR) br |= toBit;
+			else if (mover == PositionFactory.BQ) bq |= toBit;
+			else bk |= toBit;
+		}
+		occ |= toBit; // ensure 'to' is occupied
 
-        int victimValue = (flags == MoveFactory.FLAG_EN_PASSANT) ? PIECE_VALUES[victimPieceIndex] : (victimPieceIndex == -1 ? 0 : PIECE_VALUES[victimPieceIndex]);
-        gains[depth] = victimValue + promoGain;
+		boolean sideWhite = !usWhite; // opponent to move to recapture
 
-        long attackersWhite = atksBySide[0];
-        long attackersBlack = atksBySide[1];
-        if (stmWhite) attackersWhite &= ~fromBit; else attackersBlack &= ~fromBit;
+		while (true) {
+			long attackers = sideWhite ? attackersToSquareWhite(occ, to, wp, wn, wb, wr, wq, wk)
+					: attackersToSquareBlack(occ, to, bp, bn, bbB, br, bq, bk);
+			if (attackers == 0L) break;
 
-        occ |= toBit;
+			int aSq = leastValuableAttackerSquare(attackers,
+					sideWhite ? wp : bp,
+					sideWhite ? wn : bn,
+					sideWhite ? wb : bbB,
+					sideWhite ? wr : br,
+					sideWhite ? wq : bq,
+					sideWhite ? wk : bk);
 
-        int lastCaptured = attackerPieceIndex;
+			int aPieceVal = attackerPieceValueAtSquare(sideWhite, aSq, wp, wn, wb, wr, wq, wk, bp, bn, bbB, br, bq, bk);
+			if (aPieceVal == 0) break;
 
-        while (true) {
-            side ^= 1;
+			depth++;
+			if (depth >= gain.length) break;
+			gain[depth] = lastPieceVal - gain[depth - 1];
 
-            long sideAttackers = (side == 0) ? attackersWhite : attackersBlack;
-            if (sideAttackers == 0) break;
+			long aBit = 1L << aSq;
+			// move attacker from aSq to 'to': remove from aSq, keep 'to' occupied
+			if (sideWhite) {
+				if ((wp & aBit) != 0) { wp &= ~aBit; }
+				else if ((wn & aBit) != 0) { wn &= ~aBit; }
+				else if ((wb & aBit) != 0) { wb &= ~aBit; }
+				else if ((wr & aBit) != 0) { wr &= ~aBit; }
+				else if ((wq & aBit) != 0) { wq &= ~aBit; }
+				else if ((wk & aBit) != 0) { wk &= ~aBit; }
+			} else {
+				if ((bp & aBit) != 0) { bp &= ~aBit; }
+				else if ((bn & aBit) != 0) { bn &= ~aBit; }
+				else if ((bbB & aBit) != 0) { bbB &= ~aBit; }
+				else if ((br & aBit) != 0) { br &= ~aBit; }
+				else if ((bq & aBit) != 0) { bq &= ~aBit; }
+				else if ((bk & aBit) != 0) { bk &= ~aBit; }
+			}
+			occ &= ~aBit;
 
-            int nextAttackerSq = leastValuableAttackerSquare(bb, occ, sideAttackers, to);
-            if (nextAttackerSq == -1) break;
+			lastPieceVal = aPieceVal; // next side will capture this piece
+			sideWhite = !sideWhite;
+		}
 
-            int nextAttackerPiece = PositionFactory.pieceAt(bb, nextAttackerSq);
-            if (nextAttackerPiece == -1) nextAttackerPiece = (side == 0) ? PositionFactory.WP : PositionFactory.BP;
+		while (depth > 0) {
+			gain[depth - 1] = Math.max(-gain[depth - 1], gain[depth]);
+			depth--;
+		}
+		return gain[0];
+	}
 
-            depth++;
-            gains[depth] = PIECE_VALUES[lastCaptured] - gains[depth - 1];
+	static boolean isBadCapture(long[] bb, int move) {
+		return seeCapture(bb, move) < 0;
+	}
 
-            long nextFromBit = 1L << nextAttackerSq;
-            occ ^= nextFromBit;
+	private static long attackersToSquareWhite(long occ, int sq, long wp, long wn, long wb, long wr, long wq, long wk) {
+		long atk = 0L;
+		atk |= MoveGenerator.PAWN_ATK_W[sq] & wp;
+		atk |= MoveGenerator.KNIGHT_ATK[sq] & wn;
+		atk |= MoveGenerator.bishopAtt(occ, sq) & (wb | wq);
+		atk |= MoveGenerator.rookAtt(occ, sq) & (wr | wq);
+		atk |= MoveGenerator.KING_ATK[sq] & wk;
+		return atk;
+	}
 
-            long discovered = discoveredAttackers(bb, occ, nextAttackerSq, to);
-            if (side == 0) attackersWhite = (attackersWhite & ~nextFromBit) | (discovered & whiteAll);
-            else           attackersBlack = (attackersBlack & ~nextFromBit) | (discovered & blackAll);
+	private static long attackersToSquareBlack(long occ, int sq, long bp, long bn, long bbB, long br, long bq, long bk) {
+		long atk = 0L;
+		atk |= MoveGenerator.PAWN_ATK_B[sq] & bp;
+		atk |= MoveGenerator.KNIGHT_ATK[sq] & bn;
+		atk |= MoveGenerator.bishopAtt(occ, sq) & (bbB | bq);
+		atk |= MoveGenerator.rookAtt(occ, sq) & (br | bq);
+		atk |= MoveGenerator.KING_ATK[sq] & bk;
+		return atk;
+	}
 
-            occ |= toBit;
-            lastCaptured = nextAttackerPiece;
-        }
+	private static int leastValuableAttackerSquare(long attackers, long p, long n, long b, long r, long q, long k) {
+		long m;
+		m = attackers & p; if (m != 0) return Long.numberOfTrailingZeros(m);
+		m = attackers & n; if (m != 0) return Long.numberOfTrailingZeros(m);
+		m = attackers & b; if (m != 0) return Long.numberOfTrailingZeros(m);
+		m = attackers & r; if (m != 0) return Long.numberOfTrailingZeros(m);
+		m = attackers & q; if (m != 0) return Long.numberOfTrailingZeros(m);
+		m = attackers & k; if (m != 0) return Long.numberOfTrailingZeros(m);
+		return -1;
+	}
 
-        while (depth > 0) {
-            gains[depth - 1] = Math.max(-gains[depth - 1], gains[depth]);
-            depth--;
-        }
-        return gains[0];
-    }
-
-    private static int promoToPieceIndex(long[] bb, int from, int promo) {
-        boolean white = PositionFactory.whiteToMove(bb);
-        int base = white ? PositionFactory.WN : PositionFactory.BN;
-        return base + promo;
-    }
-
-    private static int pawnIndexAtSquare(long[] bb, int sq) {
-        if ((bb[PositionFactory.WP] & (1L << sq)) != 0) return PositionFactory.WP;
-        if ((bb[PositionFactory.BP] & (1L << sq)) != 0) return PositionFactory.BP;
-        return -1;
-    }
-
-    private static long attackersTo(long[] bb, long occ, int sq, boolean forWhite) {
-        long atk = 0L, sqBit = 1L << sq;
-        if (forWhite) {
-            atk |= bb[PositionFactory.WP] & (((sqBit & ~MoveGenerator.FILE_H) >>> 7) | ((sqBit & ~MoveGenerator.FILE_A) >>> 9));
-            atk |= MoveGenerator.KNIGHT_ATK[sq] & bb[PositionFactory.WN];
-            atk |= MoveGenerator.bishopAtt(occ, sq) & (bb[PositionFactory.WB] | bb[PositionFactory.WQ]);
-            atk |= MoveGenerator.rookAtt(occ, sq) & (bb[PositionFactory.WR] | bb[PositionFactory.WQ]);
-            atk |= MoveGenerator.KING_ATK[sq] & bb[PositionFactory.WK];
-        } else {
-            atk |= bb[PositionFactory.BP] & (((sqBit & ~MoveGenerator.FILE_H) << 9) | ((sqBit & ~MoveGenerator.FILE_A) << 7));
-            atk |= MoveGenerator.KNIGHT_ATK[sq] & bb[PositionFactory.BN];
-            atk |= MoveGenerator.bishopAtt(occ, sq) & (bb[PositionFactory.BB] | bb[PositionFactory.BQ]);
-            atk |= MoveGenerator.rookAtt(occ, sq) & (bb[PositionFactory.BR] | bb[PositionFactory.BQ]);
-            atk |= MoveGenerator.KING_ATK[sq] & bb[PositionFactory.BK];
-        }
-        return atk;
-    }
-
-    private static int leastValuableAttackerSquare(long[] bb, long occ, long attackersMask, int toSq) {
-        int sq;
-        long mask;
-        // Pawns
-        mask = attackersMask & (bb[PositionFactory.WP] | bb[PositionFactory.BP]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        // Knights
-        mask = attackersMask & (bb[PositionFactory.WN] | bb[PositionFactory.BN]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        // Bishops
-        mask = attackersMask & (bb[PositionFactory.WB] | bb[PositionFactory.BB]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        // Rooks
-        mask = attackersMask & (bb[PositionFactory.WR] | bb[PositionFactory.BR]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        // Queens
-        mask = attackersMask & (bb[PositionFactory.WQ] | bb[PositionFactory.BQ]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        // Kings
-        mask = attackersMask & (bb[PositionFactory.WK] | bb[PositionFactory.BK]);
-        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
-        return -1;
-    }
-
-    private static long discoveredAttackers(long[] bb, long occ, int fromSq, int toSq) {
-        long discovered = 0L;
-        discovered |= MoveGenerator.bishopAtt(occ, toSq) & (bb[PositionFactory.WB] | bb[PositionFactory.BB] | bb[PositionFactory.WQ] | bb[PositionFactory.BQ]);
-        discovered |= MoveGenerator.rookAtt(occ, toSq)   & (bb[PositionFactory.WR] | bb[PositionFactory.BR] | bb[PositionFactory.WQ] | bb[PositionFactory.BQ]);
-        return discovered;
-    }
+	private static int attackerPieceValueAtSquare(boolean white, int sq,
+												long wp, long wn, long wb, long wr, long wq, long wk,
+												long bp, long bn, long bbB, long br, long bq, long bk) {
+		long bit = 1L << sq;
+		if (white) {
+			if ((wp & bit) != 0) return PIECE_VALUES[PositionFactory.WP];
+			if ((wn & bit) != 0) return PIECE_VALUES[PositionFactory.WN];
+			if ((wb & bit) != 0) return PIECE_VALUES[PositionFactory.WB];
+			if ((wr & bit) != 0) return PIECE_VALUES[PositionFactory.WR];
+			if ((wq & bit) != 0) return PIECE_VALUES[PositionFactory.WQ];
+			if ((wk & bit) != 0) return PIECE_VALUES[PositionFactory.WK];
+		} else {
+			if ((bp & bit) != 0) return PIECE_VALUES[PositionFactory.BP];
+			if ((bn & bit) != 0) return PIECE_VALUES[PositionFactory.BN];
+			if ((bbB & bit) != 0) return PIECE_VALUES[PositionFactory.BB];
+			if ((br & bit) != 0) return PIECE_VALUES[PositionFactory.BR];
+			if ((bq & bit) != 0) return PIECE_VALUES[PositionFactory.BQ];
+			if ((bk & bit) != 0) return PIECE_VALUES[PositionFactory.BK];
+		}
+		return 0;
+	}
 }
 
 
