@@ -463,6 +463,23 @@ public final class Search {
 		for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
 
+			if (!inCheck) {
+				int flags = MoveFactory.GetFlags(move);
+				boolean isCapture = false;
+				
+				if (flags == MoveFactory.FLAG_EN_PASSANT) {
+					isCapture = true;
+				} else {
+					int to = MoveFactory.GetTo(move);
+					int targetPiece = PositionFactory.pieceAt(board, to);
+					isCapture = targetPiece != -1;
+				}
+				
+				if (isCapture && !SEE.seeGE(board, move, 0)) {
+					continue; 
+				}
+			}
+
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
