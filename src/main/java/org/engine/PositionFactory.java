@@ -710,6 +710,14 @@ public final class PositionFactory {
     return -1;
   }
 
+  public static boolean isQuiet(long[] bb, int mv) {
+    int flags = MoveFactory.GetFlags(mv);
+    if (flags == MoveFactory.FLAG_PROMOTION || flags == MoveFactory.FLAG_CASTLE) return false;
+    if (flags == MoveFactory.FLAG_EN_PASSANT) return false;
+    int to = MoveFactory.GetTo(mv);
+    return pieceAt(bb, to) == -1;
+  }
+
   public boolean isPseudoLegalMove(long[] bb, int mv, MoveGenerator gen) {
     int m = MoveFactory.intToMove(mv);
     if (MoveFactory.isNone(m)) return false;
