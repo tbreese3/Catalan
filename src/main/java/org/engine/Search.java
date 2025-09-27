@@ -460,8 +460,14 @@ public final class Search {
 
 		boolean movePlayed = false;
         int bestScore = standPat;
-		for (int move; !MoveFactory.isNone(move = picker.next()); ) {
+        for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
+
+            if (!inCheck) {
+                if (SEE.see(board, move) < 0) {
+                    continue;
+                }
+            }
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
