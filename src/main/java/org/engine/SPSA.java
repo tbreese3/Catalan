@@ -14,7 +14,7 @@ LMRBase100, int, 75.0, 0.0, 300.0, 5.0, 0.003
 LMRDivisor100, int, 225.0, 1.0, 1000.0, 10.0, 0.003
 FUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 FUTMarginPerDepth, int, 128.0, 0.0, 1024.0, 16.0, 0.003
-QSeeMargin, int, 0.0, 0.0, 1024.0, 8.0, 0.003
+QSeeMargin, int, 0.0, -1024.0, 1024.0, 8.0, 0.003
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -50,7 +50,7 @@ public final class SPSA {
                 futilityMarginPerDepth = Math.max(0, value);
                 break;
             case "QSeeMargin":
-                qseeMargin = Math.max(0, value);
+                qseeMargin = value; // allow negative margins
                 break;
             case "NMPBase":
                 nmpBase = Math.max(0, value);

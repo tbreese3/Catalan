@@ -91,7 +91,7 @@ public final class Search {
 		this.lmrDivisor = spsa.lmrDivisor;
 		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
 		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
-		this.qsSeeMargin = Math.max(0, spsa.qseeMargin);
+		this.qsSeeMargin = spsa.qseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
 		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);

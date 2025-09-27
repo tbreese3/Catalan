@@ -42,7 +42,7 @@ public class UCI {
                 System.out.println("option name LMRDivisor100 type spin default 225 min 1 max 1000");
                 System.out.println("option name FUTMaxDepth type spin default 3 min 0 max 8");
                 System.out.println("option name FUTMarginPerDepth type spin default 128 min 0 max 1024");
-                System.out.println("option name QSeeMargin type spin default 0 min 0 max 1024");
+                System.out.println("option name QSeeMargin type spin default 0 min -1024 max 1024");
                 System.out.println("uciok");
             } else if (line.equals("isready")) {
                 System.out.println("readyok");
