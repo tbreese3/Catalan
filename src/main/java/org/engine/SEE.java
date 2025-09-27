@@ -57,7 +57,7 @@ final class SEE {
 
         occ ^= fromBit;
 
-        int[] gains = new int[32];
+        int[] gains = new int[64];
         int depth = 0;
         int side = stmWhite ? 0 : 1;
 
@@ -138,15 +138,22 @@ final class SEE {
     private static int leastValuableAttackerSquare(long[] bb, long occ, long attackersMask, int toSq) {
         int sq;
         long mask;
+        // Pawns
         mask = attackersMask & (bb[PositionFactory.WP] | bb[PositionFactory.BP]);
         if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
+        // Knights
         mask = attackersMask & (bb[PositionFactory.WN] | bb[PositionFactory.BN]);
         if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
+        // Bishops
         mask = attackersMask & (bb[PositionFactory.WB] | bb[PositionFactory.BB]);
+        if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
+        // Rooks
         mask = attackersMask & (bb[PositionFactory.WR] | bb[PositionFactory.BR]);
         if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
+        // Queens
         mask = attackersMask & (bb[PositionFactory.WQ] | bb[PositionFactory.BQ]);
         if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
+        // Kings
         mask = attackersMask & (bb[PositionFactory.WK] | bb[PositionFactory.BK]);
         if (mask != 0) { sq = Long.numberOfTrailingZeros(mask); return sq; }
         return -1;
