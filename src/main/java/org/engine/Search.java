@@ -80,7 +80,9 @@ public final class Search {
 
 	private final double lmrBase;
 	private final double lmrDivisor;
-	private final int futilityMaxDepth;
+	private final int rfpMaxDepth;  // Reverse Futility Pruning
+	private final int rfpMarginPerDepth;
+	private final int futilityMaxDepth;  // Move-based Futility Pruning
 	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
 	private final int nmpBase;
@@ -92,6 +94,8 @@ public final class Search {
 		if (spsa == null) spsa = new SPSA();
 		this.lmrBase = spsa.lmrBase;
 		this.lmrDivisor = spsa.lmrDivisor;
+		this.rfpMaxDepth = Math.max(0, spsa.rfpMaxDepth);
+		this.rfpMarginPerDepth = Math.max(0, spsa.rfpMarginPerDepth);
 		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
 		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
@@ -269,10 +273,11 @@ public final class Search {
             se.staticEval = rawEval;
         }
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= futilityMaxDepth) {
+		// Reverse futility pruning (static evaluation pruning)
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= rfpMaxDepth) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int eval = se.staticEval;
-				int margin = futilityMarginPerDepth * depth;
+				int margin = rfpMarginPerDepth * depth;
 				if (Math.abs(beta) < MATE_VALUE && eval - margin >= beta) {
 					return eval - margin;
 				}
@@ -313,15 +318,22 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
-				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
+			
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= futilityMaxDepth && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
-				if (eval != SCORE_NONE) {
+				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE) {
 					int margin = futilityMarginPerDepth * depth;
-					if (quietsTried >= threshold && eval + margin <= alpha) {
-						quietsTried++;
+					if (eval + margin <= alpha) {
 						continue;
 					}
+				}
+			}
+			
+			// Late move pruning (LMP)
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
+				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
+				if (quietsTried >= threshold) {
+					continue;
 				}
 			}
 
