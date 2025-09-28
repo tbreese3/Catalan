@@ -47,6 +47,7 @@ public class UCI {
                     System.out.println("option name LMPMaxDepth type spin default " + spsa.lmpMaxDepth + " min 0 max 8");
                     System.out.println("option name LMPBaseThreshold type spin default " + spsa.lmpBaseThreshold + " min 0 max 64");
                     System.out.println("option name LMPPerDepth type spin default " + spsa.lmpPerDepth + " min 0 max 16");
+                    System.out.println("option name NSeeMargin type spin default " + spsa.nseeMargin + " min -1024 max 1024");
                 }
                 System.out.println("uciok");
             } else if (line.equals("isready")) {

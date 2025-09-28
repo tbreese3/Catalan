@@ -83,6 +83,7 @@ public final class Search {
 	private final int futilityMaxDepth;
 	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
+	private final int nseeMargin;
 	private final int nmpBase;
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
@@ -95,6 +96,7 @@ public final class Search {
 		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
 		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
+		this.nseeMargin = spsa.nseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
 		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);
@@ -313,6 +315,12 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
+
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && !isQuiet && move != ttMoveForNode) {
+				if (SEE.see(board, move) < nseeMargin) {
+					continue;
+				}
+			}
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;

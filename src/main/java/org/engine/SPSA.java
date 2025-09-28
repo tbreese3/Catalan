@@ -15,6 +15,7 @@ LMRDivisor100, int, 215.0, 1.0, 1000.0, 10.0, 0.003
 FUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 FUTMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
 QSeeMargin, int, -9.0, -1024.0, 1024.0, 8.0, 0.003
+NSeeMargin, int, -9.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
 LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
@@ -38,6 +39,7 @@ public final class SPSA {
     public int lmpMaxDepth = 3;
     public int lmpBaseThreshold = 4;
     public int lmpPerDepth = 2;
+    public int nseeMargin = -9;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -78,6 +80,9 @@ public final class SPSA {
                 break;
             case "LMPPerDepth":
                 lmpPerDepth = Math.max(0, value);
+                break;
+            case "NSeeMargin":
+                nseeMargin = value; // allow negative margins
                 break;
             default:
                 break;
