@@ -39,6 +39,11 @@ public class UCI {
                     System.out.println("option name NMPDepthScale100 type spin default " + (int)Math.round(spsa.nmpDepthScale * 100) + " min 0 max 200");
                     System.out.println("option name NMPEvalMargin type spin default " + spsa.nmpEvalMargin + " min 1 max 4000");
                     System.out.println("option name NMPEvalMax type spin default " + spsa.nmpEvalMax + " min 0 max 10");
+                    System.out.println("option name NMPMinDepth type spin default " + spsa.nmpMinDepth + " min 0 max 20");
+                    System.out.println("option name NMPVerifyExtra type spin default " + spsa.nmpVerifyExtra + " min 0 max 4");
+                    System.out.println("option name NMPVerifyMinDepth type spin default " + spsa.nmpVerifyMinDepth + " min 0 max 30");
+                    System.out.println("option name NMPVerifyMinR type spin default " + spsa.nmpVerifyMinR + " min 0 max 10");
+                    System.out.println("option name NMPDisallowConsecutive type spin default " + spsa.nmpDisallowConsecutive + " min 0 max 1");
                     System.out.println("option name LMRBase100 type spin default " + (int)Math.round(spsa.lmrBase * 100) + " min 0 max 300");
                     System.out.println("option name LMRDivisor100 type spin default " + (int)Math.round(spsa.lmrDivisor * 100) + " min 1 max 1000");
                     System.out.println("option name FUTMaxDepth type spin default " + spsa.futilityMaxDepth + " min 0 max 8");

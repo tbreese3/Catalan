@@ -12,6 +12,7 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
+	private static final int NMP_VERIFY_REDUCTION = 1; // default; overridden by SPSA.nmpVerifyExtra
 
 	public static final class Limits {
 		public int depth = -1;
@@ -36,6 +37,8 @@ public final class Search {
 		int searchKiller;
 		int staticEval;
 		int reduction;
+		boolean nullMoveMade; // true if this node is the result of a null move
+		boolean forbidNull;   // forbid applying NMP at this node (e.g., during verification)
 
 		StackEntry() {
 			this.pv = new int[MAX_PLY];
@@ -46,6 +49,8 @@ public final class Search {
 			this.searchKiller = MoveFactory.MOVE_NONE;
 			this.staticEval = SCORE_NONE;
 			this.reduction = 0;
+			this.nullMoveMade = false;
+			this.forbidNull = false;
 		}
 	}
 
@@ -84,6 +89,11 @@ public final class Search {
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
 	private final int nmpEvalMax;
+	private final int nmpMinDepth;
+	private final int nmpVerifyExtra;
+	private final int nmpVerifyMinDepth;
+	private final int nmpVerifyMinR;
+	private final boolean nmpDisallowConsecutive;
 
 	public Search(SPSA spsa) {
 		if (spsa == null) spsa = new SPSA();
@@ -96,6 +106,11 @@ public final class Search {
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
 		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);
 		this.nmpEvalMax = Math.max(0, spsa.nmpEvalMax);
+		this.nmpMinDepth = Math.max(0, spsa.nmpMinDepth);
+		this.nmpVerifyExtra = Math.max(0, spsa.nmpVerifyExtra);
+		this.nmpVerifyMinDepth = Math.max(0, spsa.nmpVerifyMinDepth);
+		this.nmpVerifyMinR = Math.max(0, spsa.nmpVerifyMinR);
+		this.nmpDisallowConsecutive = spsa.nmpDisallowConsecutive != 0;
 		buildLmrTable();
 	}
 
@@ -152,6 +167,8 @@ public final class Search {
 				e.searchKiller = MoveFactory.MOVE_NONE;
 				e.staticEval = SCORE_NONE;
 				e.reduction = 0;
+				e.nullMoveMade = false;
+				e.forbidNull = false;
 			}
 
 
@@ -273,8 +290,15 @@ public final class Search {
 			}
 		}
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
-			if (pos.hasNonPawnMaterialForSTM(board)) {
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= nmpMinDepth) {
+			boolean allowHere = !se.forbidNull && pos.hasNonPawnMaterialForSTM(board);
+			if (allowHere) {
+				if (nmpDisallowConsecutive && se.nullMoveMade) {
+					// disallow consecutive null moves if configured
+					allowHere = false;
+				}
+			}
+			if (allowHere) {
 				int evalBonus = 0;
 				if (Math.abs(beta) < MATE_VALUE) {
 					int diff = se.staticEval - beta;
@@ -284,12 +308,36 @@ public final class Search {
 				}
 				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
 				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
+				int childDepth = depth - 1 - R;
+				if (childDepth < 0) childDepth = 0;
 				pos.makeNullMoveInPlace(board);
-				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
-				pos.undoNullMoveInPlace(board);
+				StackEntry child = stack[ply + 1];
+				boolean oldChildNull = child.nullMoveMade;
+				boolean oldChildForbid = child.forbidNull;
+				child.nullMoveMade = true; // disallow consecutive null moves below
+				child.forbidNull = false;
+				int score = -negamax(board, childDepth, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				if (score >= beta) {
-					return score;
+					boolean needVerify = (depth >= nmpVerifyMinDepth) || (R >= nmpVerifyMinR);
+					if (needVerify) {
+						int extra = (nmpVerifyExtra > 0 ? nmpVerifyExtra : NMP_VERIFY_REDUCTION);
+						int verifyDepth = Math.max(0, childDepth + extra);
+						child.forbidNull = true; // verified null-move: forbid further null moves in this subtree
+						int vScore = -negamax(board, verifyDepth, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
+						child.forbidNull = oldChildForbid;
+						child.nullMoveMade = oldChildNull;
+						pos.undoNullMoveInPlace(board);
+						if (vScore >= beta) return vScore;
+					} else {
+						child.forbidNull = oldChildForbid;
+						child.nullMoveMade = oldChildNull;
+						pos.undoNullMoveInPlace(board);
+						return score;
+					}
 				}
+				child.forbidNull = oldChildForbid;
+				child.nullMoveMade = oldChildNull;
+				pos.undoNullMoveInPlace(board);
 			}
 		}
 

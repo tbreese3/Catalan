@@ -10,6 +10,11 @@ NMPBase, int, 2.0, 0.0, 10.0, 0.5, 0.005
 NMPDepthScale100, int, 23.0, 0.0, 200.0, 2.0, 0.005
 NMPEvalMargin, int, 217.0, 1.0, 4000.0, 50.0, 0.003
 NMPEvalMax, int, 4.0, 0.0, 10.0, 0.5, 0.005
+NMPMinDepth, int, 3.0, 0.0, 20.0, 0.3, 0.003
+NMPVerifyExtra, int, 1.0, 0.0, 4.0, 0.3, 0.003
+NMPVerifyMinDepth, int, 6.0, 0.0, 30.0, 0.3, 0.003
+NMPVerifyMinR, int, 3.0, 0.0, 10.0, 0.3, 0.003
+NMPDisallowConsecutive, int, 1.0, 0.0, 1.0, 0.2, 0.003
 LMRBase100, int, 79.0, 0.0, 300.0, 5.0, 0.003
 LMRDivisor100, int, 215.0, 1.0, 1000.0, 10.0, 0.003
 FUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
@@ -32,6 +37,13 @@ public final class SPSA {
     public double nmpDepthScale = 0.23;
     public int nmpEvalMargin = 217;
     public int nmpEvalMax = 4;
+
+    // New NMP parameters
+    public int nmpMinDepth = 3;           // minimum depth to attempt NMP
+    public int nmpVerifyExtra = 1;        // verified null-move extra depth (R-1), usually 1
+    public int nmpVerifyMinDepth = 6;     // depth threshold to trigger verification search
+    public int nmpVerifyMinR = 3;         // reduction threshold to trigger verification search
+    public int nmpDisallowConsecutive = 1; // 1=true disallow consecutive null moves, 0=allow
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -63,6 +75,21 @@ public final class SPSA {
                 break;
             case "NMPEvalMax":
                 nmpEvalMax = Math.max(0, value);
+                break;
+            case "NMPMinDepth":
+                nmpMinDepth = Math.max(0, value);
+                break;
+            case "NMPVerifyExtra":
+                nmpVerifyExtra = Math.max(0, value);
+                break;
+            case "NMPVerifyMinDepth":
+                nmpVerifyMinDepth = Math.max(0, value);
+                break;
+            case "NMPVerifyMinR":
+                nmpVerifyMinR = Math.max(0, value);
+                break;
+            case "NMPDisallowConsecutive":
+                nmpDisallowConsecutive = value <= 0 ? 0 : 1;
                 break;
             default:
                 break;
