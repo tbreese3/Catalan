@@ -7,9 +7,11 @@ final class MovePicker {
 	private final int[] buffer;
 	private final int[] scores;
 	private final int[] history;
+	private final int[] contHistory;
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
+	private final int prevTo;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
@@ -21,16 +23,18 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] contHistory, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int prevTo) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.history = history;
+		this.contHistory = contHistory;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
 		this.includeQuiets = includeQuiets;
+		this.prevTo = prevTo;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
@@ -85,12 +89,33 @@ final class MovePicker {
 		return (side << 12) | (from << 6) | to;
 	}
 
+	// Continuation history indexing must match Search.java
+	private static final int CH_SIDE_STRIDE = 64 * 12 * 64;   // 49152
+	private static final int CH_PREV_TO_STRIDE = 12 * 64;     // 768
+	private static final int CH_PIECE_STRIDE = 64;            // 64
+
+	private static int continuationIndex(boolean white, int prevTo, int piece, int to) {
+		int side = white ? 0 : 1;
+		return side * CH_SIDE_STRIDE + prevTo * CH_PREV_TO_STRIDE + piece * CH_PIECE_STRIDE + to;
+	}
+
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			if (contHistory != null && prevTo >= 0 && prevTo < 64) {
+				int from = MoveFactory.GetFrom(m);
+				int to = MoveFactory.GetTo(m);
+				int piece = PositionFactory.pieceAt(board, from);
+				if (piece >= 0 && piece < 12) {
+					int chIdx = continuationIndex(white, prevTo, piece, to);
+					if (chIdx >= 0 && chIdx < contHistory.length) {
+						score += contHistory[chIdx];
+					}
+				}
+			}
 			scores[i] = score;
 		}
 	}

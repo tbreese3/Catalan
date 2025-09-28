@@ -71,6 +71,14 @@ public final class Search {
 	private static final int HISTORY_DECAY_SHIFT = 8;
 	private final int[] history = new int[HISTORY_SIZE];
 
+	// Continuation History: side x prevToSquare(64) x piece(12) x toSquare(64)
+	// We fold piece and to into a 12*64 = 768 stride per prevTo. Indexing keeps lookups cache-friendly.
+	private static final int CH_SIDE_STRIDE = 64 * 12 * 64;   // 49152
+	private static final int CH_PREV_TO_STRIDE = 12 * 64;     // 768
+	private static final int CH_PIECE_STRIDE = 64;            // 64
+	private final int[] contHistory = new int[2 * CH_SIDE_STRIDE];
+	private static final int CH_DECAY_SHIFT = 8;
+
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
 	private final int[][] lmrTable = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
@@ -251,7 +259,10 @@ public final class Search {
 			return quiescence(board, ply, alpha, beta, nodeType);
 		}
 
-		if (ply + 1 < stack.length) stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
+		if (ply + 1 < stack.length) {
+			stack[ply + 1].searchKiller = MoveFactory.MOVE_NONE;
+			stack[ply + 1].move = MoveFactory.MOVE_NONE;
+		}
 
         if (!inCheck) {
             int rawEval = (tableHit && tableEval != TranspositionTable.SCORE_VOID) ? tableEval : evaluate(board);
@@ -296,7 +307,8 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		int prevTo = MoveFactory.isNone(se.move) ? -1 : MoveFactory.GetTo(se.move);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true, prevTo);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -331,6 +343,7 @@ public final class Search {
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
+			if (ply + 1 < stack.length) stack[ply + 1].move = move;
 
 			int score;
 			if (childPv) {
@@ -368,6 +381,15 @@ public final class Search {
 					// History update on quiet fail-high
 					boolean white = PositionFactory.whiteToMove(board);
 					onQuietFailHigh(white, move, Math.max(1, depth));
+					// Continuation history update using previous move context
+					if (!MoveFactory.isNone(se.move)) {
+						int prevToSq = MoveFactory.GetTo(se.move);
+						int piece = PositionFactory.pieceAt(board, MoveFactory.GetFrom(move));
+						if (piece >= 0) {
+							int toSq = MoveFactory.GetTo(move);
+							onContinuationQuiet(white, prevToSq, piece, toSq, Math.max(1, depth));
+						}
+					}
 				}
 				break;
 			}
@@ -548,6 +570,7 @@ public final class Search {
 
 	private void clearHistory() {
 		for (int i = 0; i < history.length; i++) history[i] = 0;
+		for (int i = 0; i < contHistory.length; i++) contHistory[i] = 0;
 	}
 
 	private int historyScore(boolean white, int move) {
@@ -561,6 +584,23 @@ public final class Search {
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
 		history[idx] = current;
+	}
+
+	private static int continuationIndex(boolean white, int prevTo, int piece, int to) {
+		int side = white ? 0 : 1;
+		return side * CH_SIDE_STRIDE
+			+ prevTo * CH_PREV_TO_STRIDE
+			+ piece * CH_PIECE_STRIDE
+			+ to;
+	}
+
+	private void onContinuationQuiet(boolean white, int prevTo, int piece, int to, int depth) {
+		int idx = continuationIndex(white, prevTo, piece, to);
+		int bonus = depth * depth;
+		int current = contHistory[idx];
+		current -= (current >> CH_DECAY_SHIFT);
+		current += bonus;
+		contHistory[idx] = current;
 	}
 }
 
