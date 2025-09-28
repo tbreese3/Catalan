@@ -267,8 +267,8 @@ public final class Search {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int eval = se.staticEval;
 				int margin = futilityMarginPerDepth * depth;
-				if (Math.abs(beta) < MATE_VALUE && eval - margin >= beta) {
-					return eval - margin;
+				if (Math.abs(alpha) < MATE_VALUE && eval + margin <= alpha) {
+					return eval + margin;
 				}
 			}
 		}
