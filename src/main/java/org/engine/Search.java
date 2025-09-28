@@ -11,12 +11,12 @@ public final class Search {
 	private static final int MAX_MOVES = 256;
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
-	private static final int SCORE_NONE = 123456789; // sentinel
+	private static final int SCORE_NONE = 123456789;
 
 	public static final class Limits {
-		public int depth = -1; // fixed depth if > 0, otherwise time-based
-		public long softMs = 0L; // preferred stop after finishing an iteration
-		public long hardMs = 0L; // absolute cutoff
+		public int depth = -1;
+		public long softMs = 0L;
+		public long hardMs = 0L;
 	}
 
 	public static final class Result {
@@ -26,12 +26,6 @@ public final class Search {
 	}
 
 	private enum NodeType { rootNode, pvNode, nonPVNode }
-
-	@FunctionalInterface
-	public interface InfoHandler {
-		void onInfo(int depth, int seldepth, long nodes, long nps, int hashfull,
-		            int scoreCp, long timeMs, List<Integer> pv);
-	}
 
 	private static final class StackEntry {
 		int[] pv;
@@ -55,6 +49,11 @@ public final class Search {
 		}
 	}
 
+	@FunctionalInterface
+	public interface InfoHandler {
+		void onInfo(int depth, int seldepth, long nodes, long nps, int hashfull, int scoreCp, long timeMs, List<Integer> pv);
+	}
+
 	private volatile boolean stopRequested = false;
 	private long startTimeMs;
 	private long softStopTimeMs;
@@ -72,46 +71,45 @@ public final class Search {
 	private static final int HISTORY_DECAY_SHIFT = 8;
 	private final int[] history = new int[HISTORY_SIZE];
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
-
-	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
-	}
-
-	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
-	}
-
-	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
-		int bonus = depth * depth;
-		int current = history[idx];
-		current -= (current >> HISTORY_DECAY_SHIFT);
-		current += bonus;
-		history[idx] = current;
-	}
-
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
-	private static final int[][] LMR_TABLE = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
-	static {
+	private final int[][] lmrTable = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
+
+	private final double lmrBase;
+	private final double lmrDivisor;
+	private final int futilityMaxDepth;
+	private final int futilityMarginPerDepth;
+	private final int qsSeeMargin;
+	private final int nmpBase;
+	private final double nmpDepthScale;
+	private final int nmpEvalMargin;
+	private final int nmpEvalMax;
+
+	public Search(SPSA spsa) {
+		if (spsa == null) spsa = new SPSA();
+		this.lmrBase = spsa.lmrBase;
+		this.lmrDivisor = spsa.lmrDivisor;
+		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
+		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
+		this.qsSeeMargin = spsa.qseeMargin;
+		this.nmpBase = Math.max(0, spsa.nmpBase);
+		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
+		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);
+		this.nmpEvalMax = Math.max(0, spsa.nmpEvalMax);
+		buildLmrTable();
+	}
+
+	private void buildLmrTable() {
 		for (int d = 1; d <= LMR_MAX_DEPTH; d++) {
 			for (int m = 1; m <= LMR_MAX_MOVES; m++) {
-				double r = 0.75 + Math.log(d) * Math.log(m) / 2.25;
+				double r = lmrBase + Math.log(d) * Math.log(m) / lmrDivisor;
 				int ir = (int) r;
 				if (ir < 0) ir = 0;
-				LMR_TABLE[d][m] = ir;
+				lmrTable[d][m] = ir;
 			}
 		}
 	}
 
-	private static final int RFP_MAX_DEPTH = 3;
-	private static final int RFP_MARGIN_PER_DEPTH = 128;
 
 	public void stop() {
 		stopRequested = true;
@@ -265,10 +263,10 @@ public final class Search {
             se.staticEval = rawEval;
         }
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= RFP_MAX_DEPTH) {
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= futilityMaxDepth) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
-				int eval = se.staticEval != SCORE_NONE ? se.staticEval : evaluate(board);
-				int margin = RFP_MARGIN_PER_DEPTH * depth;
+				int eval = se.staticEval;
+				int margin = futilityMarginPerDepth * depth;
 				if (Math.abs(beta) < MATE_VALUE && eval - margin >= beta) {
 					return eval - margin;
 				}
@@ -277,7 +275,15 @@ public final class Search {
 
 		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
-				int R = (depth >= 6) ? 3 : 2;
+				int evalBonus = 0;
+				if (Math.abs(beta) < MATE_VALUE) {
+					int diff = se.staticEval - beta;
+					if (diff > 0) {
+						evalBonus = Math.min(nmpEvalMax, diff / Math.max(1, nmpEvalMargin));
+					}
+				}
+				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
+				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
 				pos.makeNullMoveInPlace(board);
 				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				pos.undoNullMoveInPlace(board);
@@ -307,7 +313,7 @@ public final class Search {
 			if (!se.inCheck && !childPv && PositionFactory.isQuiet(board, move) && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
-				int r = LMR_TABLE[dIdx][mIdx];
+				int r = lmrTable[dIdx][mIdx];
 
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
@@ -456,11 +462,11 @@ public final class Search {
         for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
 
-            if (!inCheck) {
-                if (SEE.see(board, move) < 0) {
-                    continue;
-                }
-            }
+			if (!inCheck) {
+				if (SEE.see(board, move) < qsSeeMargin) {
+					continue;
+				}
+			}
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -531,6 +537,30 @@ public final class Search {
 			pv.add(m);
 		}
 		return pv;
+	}
+
+	private static int historyIndex(boolean white, int move) {
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return (side << 12) | (from << 6) | to;
+	}
+
+	private void clearHistory() {
+		for (int i = 0; i < history.length; i++) history[i] = 0;
+	}
+
+	private int historyScore(boolean white, int move) {
+		return history[historyIndex(white, move)];
+	}
+
+	private void onQuietFailHigh(boolean white, int move, int depth) {
+		int idx = historyIndex(white, move);
+		int bonus = depth * depth;
+		int current = history[idx];
+		current -= (current >> HISTORY_DECAY_SHIFT);
+		current += bonus;
+		history[idx] = current;
 	}
 }
 

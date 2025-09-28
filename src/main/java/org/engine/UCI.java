@@ -14,7 +14,8 @@ public class UCI {
 
     private final PositionFactory pos = new PositionFactory();
     private final long[] board = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"); // replaced on position commands
-    private final Search search = new Search();
+    private final SPSA spsa = new SPSA();
+    private Search search = new Search(spsa);
     private final TimeManager timeManager = new TimeManager();
     private Thread searchThread;
 
@@ -33,15 +34,27 @@ public class UCI {
             if (line.equals("uci")) {
                 System.out.println("id name Catalan");
                 System.out.println("id author Tyler Breese");
+                if (Main.SPSA_TUNE_MODE) {
+                    System.out.println("option name NMPBase type spin default " + spsa.nmpBase + " min 0 max 10");
+                    System.out.println("option name NMPDepthScale100 type spin default " + (int)Math.round(spsa.nmpDepthScale * 100) + " min 0 max 200");
+                    System.out.println("option name NMPEvalMargin type spin default " + spsa.nmpEvalMargin + " min 1 max 4000");
+                    System.out.println("option name NMPEvalMax type spin default " + spsa.nmpEvalMax + " min 0 max 10");
+                    System.out.println("option name LMRBase100 type spin default " + (int)Math.round(spsa.lmrBase * 100) + " min 0 max 300");
+                    System.out.println("option name LMRDivisor100 type spin default " + (int)Math.round(spsa.lmrDivisor * 100) + " min 1 max 1000");
+                    System.out.println("option name FUTMaxDepth type spin default " + spsa.futilityMaxDepth + " min 0 max 8");
+                    System.out.println("option name FUTMarginPerDepth type spin default " + spsa.futilityMarginPerDepth + " min 0 max 1024");
+                    System.out.println("option name QSeeMargin type spin default " + spsa.qseeMargin + " min -1024 max 1024");
+                }
                 System.out.println("uciok");
             } else if (line.equals("isready")) {
                 System.out.println("readyok");
             } else if (line.startsWith("setoption")) {
-                // Ignored for now
+                handleSetOption(line);
             } else if (line.equals("ucinewgame")) {
                 long[] fresh = pos.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
                 System.arraycopy(fresh, 0, board, 0, fresh.length);
                 TranspositionTable.TT.clear();
+                search = new Search(spsa);
             } else if (line.startsWith("position")) {
                 handlePosition(line);
             } else if (line.startsWith("go")) {
@@ -55,10 +68,47 @@ public class UCI {
         }
     }
 
-    private void handlePosition(String cmd) {
-        // Syntax: position [startpos | fen <FEN>] [moves <move1> ...]
+    private void handleSetOption(String cmd) {
+        String name = null;
+        String value = null;
         StringTokenizer st = new StringTokenizer(cmd);
-        st.nextToken(); // position
+        st.nextToken(); // setoption
+        while (st.hasMoreTokens()) {
+            String t = st.nextToken();
+            if ("name".equals(t) && st.hasMoreTokens()) {
+                StringBuilder nb = new StringBuilder();
+                while (st.hasMoreTokens()) {
+                    String peek = st.nextToken();
+                    if ("value".equals(peek)) {
+                        break;
+                    }
+                    if (nb.length() > 0) nb.append(' ');
+                    nb.append(peek);
+                }
+                name = nb.toString();
+                if (name.endsWith(" value")) {
+                    name = name.substring(0, name.length() - 6).trim();
+                }
+            }
+            if ("value".equals(t) && st.hasMoreTokens()) {
+                value = st.nextToken("");
+                if (value != null) value = value.trim();
+                break;
+            }
+        }
+
+        if (name == null || value == null) return;
+        try {
+            int intVal = Integer.parseInt(value.trim());
+            spsa.setByName(name, intVal);
+        } catch (Exception ignored) {
+            // non-integer values are ignored for these options
+        }
+    }
+
+    private void handlePosition(String cmd) {
+        StringTokenizer st = new StringTokenizer(cmd);
+        st.nextToken();
         if (!st.hasMoreTokens()) return;
         String token = st.nextToken();
         long[] tmp;
@@ -70,7 +120,6 @@ public class UCI {
             while (st.hasMoreTokens() && parts < 6) {
                 String t = st.nextToken();
                 if ("moves".equals(t)) {
-                    // apply moves later
                     break;
                 }
                 if (fen.length() > 0) fen.append(' ');
@@ -83,7 +132,6 @@ public class UCI {
         }
         System.arraycopy(tmp, 0, board, 0, tmp.length);
 
-        // Process optional moves
         List<String> rest = new ArrayList<>();
         while (st.hasMoreTokens()) rest.add(st.nextToken());
         applyMoves(rest);
@@ -108,7 +156,6 @@ public class UCI {
         int flags = MoveFactory.FLAG_NORMAL;
         int promo = 0;
 
-        // Promotion suffix (e.g., e7e8q)
         if (uci.length() >= 5) {
             char p = Character.toLowerCase(uci.charAt(4));
             if (p == 'n') promo = 0;
