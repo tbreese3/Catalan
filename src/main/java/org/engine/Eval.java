@@ -9,6 +9,7 @@ import java.io.InputStream;
 
 import static org.engine.MoveFactory.*;
 import static org.engine.PositionFactory.*;
+import static org.engine.Search.MAX_PLY;
 
 public final class Eval {
   private Eval() {}
@@ -36,17 +37,14 @@ public final class Eval {
   private static final VectorSpecies<Short> SHORT_SPECIES = ShortVector.SPECIES_PREFERRED;
   private static final int UPPER_BOUND = SHORT_SPECIES.loopBound(HL_SIZE);
 
-  // Safety stack size for incremental accumulators
-  private static final int ACC_STACK = 256; // generous ply budget
-
   public static final class NNUEState {
     public int currentAccumulator;
     public final short[][] whiteAccumulator;
     public final short[][] blackAccumulator;
 
     public NNUEState() {
-      this.whiteAccumulator = new short[ACC_STACK][HL_SIZE];
-      this.blackAccumulator = new short[ACC_STACK][HL_SIZE];
+      this.whiteAccumulator = new short[MAX_PLY][HL_SIZE];
+      this.blackAccumulator = new short[MAX_PLY][HL_SIZE];
       currentAccumulator = 0;
     }
   }
