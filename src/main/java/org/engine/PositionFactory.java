@@ -600,6 +600,14 @@ public final class PositionFactory {
     return gen.kingAttacked(bb, whiteToMove(bb));
   }
 
+  public boolean givesCheck(long[] bb, int mv, MoveGenerator gen) {
+    if (gen == null) gen = new MoveGenerator();
+    if (!makeMoveInPlace(bb, mv, gen)) return false;
+    boolean result = gen.kingAttacked(bb, whiteToMove(bb));
+    undoMoveInPlace(bb);
+    return result;
+  }
+
   public boolean hasNonPawnMaterialForSide(long[] bb, boolean white) {
     if (white) {
       return (bb[WN] | bb[WB] | bb[WR] | bb[WQ]) != 0L;

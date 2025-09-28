@@ -313,6 +313,20 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
+
+				if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= futilityMaxDepth) {
+					if (pos.hasNonPawnMaterialForSTM(board)) {
+						int eval = se.staticEval;
+						if (eval != SCORE_NONE) {
+							int margin = futilityMarginPerDepth * depth;
+							if (Math.abs(alpha) < MATE_VALUE && eval + margin <= alpha && move != ttMoveForNode && move != killer) {
+								boolean givesCheck = pos.givesCheck(board, move, moveGen);
+								if (!givesCheck) { quietsTried++; continue; }
+							}
+						}
+					}
+				}
+
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;
