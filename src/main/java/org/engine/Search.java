@@ -66,7 +66,6 @@ public final class Search {
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
-	// History heuristic (moved from History.java)
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_DECAY_SHIFT = 8;
 	private final int[] history = new int[HISTORY_SIZE];
@@ -74,6 +73,10 @@ public final class Search {
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
 	private final int[][] lmrTable = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
+
+	private final int lmpMaxDepth;
+	private final int lmpBaseThreshold;
+	private final int lmpPerDepth;
 
 	private final double lmrBase;
 	private final double lmrDivisor;
@@ -96,6 +99,9 @@ public final class Search {
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
 		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);
 		this.nmpEvalMax = Math.max(0, spsa.nmpEvalMax);
+		this.lmpMaxDepth = Math.max(0, spsa.lmpMaxDepth);
+		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
+		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
 		buildLmrTable();
 	}
 
@@ -302,15 +308,28 @@ public final class Search {
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
 		int i = 0;
+		int quietsTried = 0;
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
-			// Late Move Reductions
+			boolean isQuiet = PositionFactory.isQuiet(board, move);
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
+				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
+				int eval = se.staticEval;
+				if (eval != SCORE_NONE) {
+					int margin = futilityMarginPerDepth * depth;
+					if (quietsTried >= threshold && eval + margin <= alpha) {
+						quietsTried++;
+						continue;
+					}
+				}
+			}
+
 			int searchDepthChild = depth - 1;
 			int appliedReduction = 0;
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
-			if (!se.inCheck && !childPv && PositionFactory.isQuiet(board, move) && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+			if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
@@ -350,6 +369,7 @@ public final class Search {
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
 
+			if (isQuiet) quietsTried++;
 			if (score > bestScore) {
 				bestScore = score;
 				if (score > alpha) {
@@ -362,10 +382,10 @@ public final class Search {
 			}
 
 			if (alpha >= beta) {
-				if (PositionFactory.isQuiet(board, move)) {
+				if (isQuiet) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
-					// History update on quiet fail-high
+
 					boolean white = PositionFactory.whiteToMove(board);
 					onQuietFailHigh(white, move, Math.max(1, depth));
 				}
@@ -448,7 +468,6 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-		// Mate distance pruning
 		alpha = Math.max(alpha, -MATE_VALUE + ply);
 		beta  = Math.min(beta,  MATE_VALUE - (ply + 1));
 		if (alpha >= beta) return alpha;
