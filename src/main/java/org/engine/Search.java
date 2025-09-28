@@ -329,6 +329,16 @@ public final class Search {
 
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
+				if (!MoveFactory.isNone(se.move)) {
+					int prevToSq = MoveFactory.GetTo(se.move);
+					int piece = PositionFactory.pieceAt(board, MoveFactory.GetFrom(move));
+					if (piece >= 0) {
+						int toSq = MoveFactory.GetTo(move);
+						int chIdx = continuationIndex(whiteSTM, prevToSq, piece, toSq);
+						int chVal = (chIdx >= 0 && chIdx < contHistory.length) ? contHistory[chIdx] : 0;
+						hVal += chVal / 2;
+					}
+				}
 				if (hVal > 4096) r = Math.max(0, r - 2);
 				else if (hVal > 1024) r = Math.max(0, r - 1);
 
@@ -477,7 +487,8 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        int prevToQ = MoveFactory.isNone(stack[ply].move) ? -1 : MoveFactory.GetTo(stack[ply].move);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, prevToQ);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -494,7 +505,9 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
-			int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType);
+            // Track previous move for CH in quiescence as well
+            if (ply + 1 < stack.length) stack[ply + 1].move = move;
+            int score = -quiescence(board, ply + 1, -beta, -alpha, nodeType);
 
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
