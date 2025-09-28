@@ -351,18 +351,27 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
+			int extension = 0;
+			if (pos.isInCheck(board)) {
+				extension = 1;
+			}
+
+			int dChild = Math.max(1, searchDepthChild + extension);
+
 			int score;
 			if (childPv) {
-				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
+				score = -negamax(board, dChild, ply + 1, -beta, -alpha, NodeType.pvNode);
 			} else {
-				score = -negamax(board, searchDepthChild, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+				score = -negamax(board, dChild, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 
 				if (appliedReduction > 0 && score > alpha) {
-					score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+					int verifyDepth = Math.max(1, (depth - 1) + extension);
+					score = -negamax(board, verifyDepth, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 				}
 				
 				if (parentIsPV && score > alpha && score < beta) {
-					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
+					int pvDepth = Math.max(1, (depth - 1) + extension);
+					score = -negamax(board, pvDepth, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
 			}
 
