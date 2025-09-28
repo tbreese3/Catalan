@@ -67,9 +67,11 @@ public final class Search {
 	private final PositionFactory pos = new PositionFactory();
 
 	// History heuristic (moved from History.java)
-	private static final int HISTORY_SIZE = 2 * 64 * 64;
-	private static final int HISTORY_DECAY_SHIFT = 8;
-	private final int[] history = new int[HISTORY_SIZE];
+	// Multi-dimensional array: [side][from][to]
+	private final int[][][] history = new int[2][64][64];
+	// Gravity-based history constants
+	private static final double HISTORY_GRAVITY = 1.8;
+	private static final int HISTORY_MAX = 16384;
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -539,28 +541,45 @@ public final class Search {
 		return pv;
 	}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
 
 	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
+		for (int side = 0; side < 2; side++) {
+			for (int from = 0; from < 64; from++) {
+				for (int to = 0; to < 64; to++) {
+					history[side][from][to] = 0;
+				}
+			}
+		}
 	}
 
 	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return history[side][from][to];
 	}
 
 	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		
+		// Gravity-based history update
+		int current = history[side][from][to];
 		int bonus = depth * depth;
-		int current = history[idx];
-		current -= (current >> HISTORY_DECAY_SHIFT);
+		
+		// Apply gravity: bonus decreases as history value increases
+		if (current > 0) {
+			double gravityFactor = 1.0 / (1.0 + current / (double)HISTORY_MAX * HISTORY_GRAVITY);
+			bonus = (int)(bonus * gravityFactor);
+		}
+		
+		// Update with clamping to prevent overflow
 		current += bonus;
-		history[idx] = current;
+		if (current > HISTORY_MAX) current = HISTORY_MAX;
+		if (current < -HISTORY_MAX) current = -HISTORY_MAX;
+		
+		history[side][from][to] = current;
 	}
 }
 
