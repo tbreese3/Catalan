@@ -7,7 +7,7 @@ public final class Search {
 
 	private final Eval.NNUEState nnueState = new Eval.NNUEState();
 
-	public static final int MAX_PLY = 128;
+	public static final int MAX_PLY = 256;
 	private static final int MAX_MOVES = 256;
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
