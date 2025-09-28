@@ -506,8 +506,7 @@ public final class Search {
 
         int rawEval = (standPat != -INFTY) ? standPat : 0;
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
-        int storeBound = (bestScore >= beta) ? TranspositionTable.BOUND_LOWER : TranspositionTable.BOUND_UPPER;
-        ttEntry.store(pos.zobrist(board), storeBound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
+		ttEntry.store(pos.zobrist(board), bound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
 
 		return bestScore;
 	}
