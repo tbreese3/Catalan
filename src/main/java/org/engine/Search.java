@@ -12,6 +12,7 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
+	private static final int MOVE_NULL = -1;
 
 	public static final class Limits {
 		public int depth = -1;
@@ -286,7 +287,8 @@ public final class Search {
 			}
 		}
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
+		boolean prevWasNull = (ply > 0) && (stack[ply - 1].move == MOVE_NULL);
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3 && !prevWasNull) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int evalBonus = 0;
 				if (Math.abs(beta) < MATE_VALUE) {
@@ -297,6 +299,7 @@ public final class Search {
 				}
 				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
 				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
+				stack[ply + 1].move = MOVE_NULL;
 				pos.makeNullMoveInPlace(board);
 				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				pos.undoNullMoveInPlace(board);
@@ -370,6 +373,7 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
+			stack[ply + 1].move = move;
 			int score;
 			if (childPv) {
 				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
