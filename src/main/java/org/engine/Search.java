@@ -78,6 +78,11 @@ public final class Search {
 	private final int lmpBaseThreshold;
 	private final int lmpPerDepth;
 
+	// Internal Iterative Reductions (IIR) configuration
+	private final int iirMinDepth;           // minimum depth to allow IIR
+	private final int iirBaseReductionPV;    // base reduction for PV nodes
+	private final int iirBaseReductionNonPV; // base reduction for expected cut-nodes (non-PV)
+
 	private final double lmrBase;
 	private final double lmrDivisor;
 	private final int futilityMaxDepth;
@@ -102,6 +107,9 @@ public final class Search {
 		this.lmpMaxDepth = Math.max(0, spsa.lmpMaxDepth);
 		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
 		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
+		this.iirMinDepth = Math.max(0, spsa.iirMinDepth);
+		this.iirBaseReductionPV = Math.max(0, spsa.iirBaseReductionPV);
+		this.iirBaseReductionNonPV = Math.max(0, spsa.iirBaseReductionNonPV);
 		buildLmrTable();
 	}
 
@@ -250,6 +258,17 @@ public final class Search {
 		se.inCheck = inCheck;
 		if (inCheck) {
 			se.staticEval = SCORE_NONE;
+		}
+
+		// Internal Iterative Reductions (IIR)
+		if (!inCheck && depth >= iirMinDepth && nodeType != NodeType.rootNode) {
+			int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
+			boolean hasHashMove = tableHit && ttPackedMove != 0;
+			if (!hasHashMove) {
+				int iir = (nodeType == NodeType.pvNode) ? iirBaseReductionPV : iirBaseReductionNonPV;
+				if (tableHit && tableDepth >= depth) iir++;
+				if (iir > 0) depth = Math.max(1, depth - Math.min(iir, depth - 1));
+			}
 		}
 
 		if (depth <= 0) {

@@ -18,6 +18,9 @@ QSeeMargin, int, -9.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
 LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
+IIRMinDepth, int, 6.0, 0.0, 16.0, 1.0, 0.005
+IIRBasePV, int, 1.0, 0.0, 4.0, 1.0, 0.005
+IIRBaseNonPV, int, 1.0, 0.0, 4.0, 1.0, 0.005
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -38,6 +41,9 @@ public final class SPSA {
     public int lmpMaxDepth = 3;
     public int lmpBaseThreshold = 4;
     public int lmpPerDepth = 2;
+    public int iirMinDepth = 6;
+    public int iirBaseReductionPV = 1;
+    public int iirBaseReductionNonPV = 1;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -78,6 +84,15 @@ public final class SPSA {
                 break;
             case "LMPPerDepth":
                 lmpPerDepth = Math.max(0, value);
+                break;
+            case "IIRMinDepth":
+                iirMinDepth = Math.max(0, value);
+                break;
+            case "IIRBasePV":
+                iirBaseReductionPV = Math.max(0, value);
+                break;
+            case "IIRBaseNonPV":
+                iirBaseReductionNonPV = Math.max(0, value);
                 break;
             default:
                 break;
