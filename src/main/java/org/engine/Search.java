@@ -77,14 +77,15 @@ public final class Search {
 	private final int lmpMaxDepth;
 	private final int lmpBaseThreshold;
 	private final int lmpPerDepth;
+	private final int lmpMarginPerDepth;
 
 	private final int iirMinPVDepth;
 	private final int iirMinCutDepth;
 
 	private final double lmrBase;
 	private final double lmrDivisor;
-	private final int futilityMaxDepth;
-	private final int futilityMarginPerDepth;
+	private final int reverseFutilityMaxDepth;
+	private final int reverseFutilityMarginPerDepth;
 	private final int qsSeeMargin;
 	private final int nmpBase;
 	private final double nmpDepthScale;
@@ -95,8 +96,8 @@ public final class Search {
 		if (spsa == null) spsa = new SPSA();
 		this.lmrBase = spsa.lmrBase;
 		this.lmrDivisor = spsa.lmrDivisor;
-		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
-		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
+		this.reverseFutilityMaxDepth = Math.max(0, spsa.reverseFutilityMaxDepth);
+		this.reverseFutilityMarginPerDepth = Math.max(0, spsa.reverseFutilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
@@ -105,6 +106,7 @@ public final class Search {
 		this.lmpMaxDepth = Math.max(0, spsa.lmpMaxDepth);
 		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
 		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
+		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
 		buildLmrTable();
@@ -274,10 +276,10 @@ public final class Search {
             se.staticEval = rawEval;
         }
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= futilityMaxDepth) {
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= reverseFutilityMaxDepth) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int eval = se.staticEval;
-				int margin = futilityMarginPerDepth * depth;
+				int margin = reverseFutilityMarginPerDepth * depth;
 				if (Math.abs(beta) < MATE_VALUE && eval - margin >= beta) {
 					return eval - margin;
 				}
@@ -334,7 +336,7 @@ public final class Search {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE) {
-					int margin = futilityMarginPerDepth * depth;
+					int margin = lmpMarginPerDepth * depth;
 					if (quietsTried >= threshold && eval + margin <= alpha) {
 						quietsTried++;
 						continue;

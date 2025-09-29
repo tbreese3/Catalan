@@ -41,12 +41,13 @@ public class UCI {
                     System.out.println("option name NMPEvalMax type spin default " + spsa.nmpEvalMax + " min 0 max 10");
                     System.out.println("option name LMRBase100 type spin default " + (int)Math.round(spsa.lmrBase * 100) + " min 0 max 300");
                     System.out.println("option name LMRDivisor100 type spin default " + (int)Math.round(spsa.lmrDivisor * 100) + " min 1 max 1000");
-                    System.out.println("option name FUTMaxDepth type spin default " + spsa.futilityMaxDepth + " min 0 max 8");
-                    System.out.println("option name FUTMarginPerDepth type spin default " + spsa.futilityMarginPerDepth + " min 0 max 1024");
+                    System.out.println("option name ReverseFUTMaxDepth type spin default " + spsa.reverseFutilityMaxDepth + " min 0 max 8");
+                    System.out.println("option name ReverseFUTMarginPerDepth type spin default " + spsa.reverseFutilityMarginPerDepth + " min 0 max 1024");
                     System.out.println("option name QSeeMargin type spin default " + spsa.qseeMargin + " min -1024 max 1024");
                     System.out.println("option name LMPMaxDepth type spin default " + spsa.lmpMaxDepth + " min 0 max 8");
                     System.out.println("option name LMPBaseThreshold type spin default " + spsa.lmpBaseThreshold + " min 0 max 64");
                     System.out.println("option name LMPPerDepth type spin default " + spsa.lmpPerDepth + " min 0 max 16");
+                    System.out.println("option name LMPMarginPerDepth type spin default " + spsa.lmpMarginPerDepth + " min 0 max 1024");
                     System.out.println("option name IIRMinPVDepth type spin default " + spsa.iirMinPVDepth + " min 0 max 16");
                     System.out.println("option name IIRMinCutDepth type spin default " + spsa.iirMinCutDepth + " min 0 max 16");
                 }
