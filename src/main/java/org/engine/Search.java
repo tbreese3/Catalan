@@ -78,7 +78,6 @@ public final class Search {
 	private final int lmpBaseThreshold;
 	private final int lmpPerDepth;
 
-	private final int iirMinDepth;
 	private final int iirMinPVDepth;
 	private final int iirMinCutDepth;
 
@@ -106,7 +105,6 @@ public final class Search {
 		this.lmpMaxDepth = Math.max(0, spsa.lmpMaxDepth);
 		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
 		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
-		this.iirMinDepth = Math.max(0, spsa.iirMinDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
 		buildLmrTable();
