@@ -14,8 +14,6 @@ LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
 LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
 IIRMinDepth, int, 6.0, 0.0, 16.0, 1.0, 0.005
-IIRBasePV, int, 1.0, 0.0, 4.0, 1.0, 0.005
-IIRBaseNonPV, int, 1.0, 0.0, 4.0, 1.0, 0.005
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 4.0, 0.0, 16.0, 1.0, 0.005
 
@@ -85,12 +83,6 @@ public final class SPSA {
                 break;
             case "IIRMinDepth":
                 iirMinDepth = Math.max(0, value);
-                break;
-            case "IIRBasePV":
-                iirBaseReductionPV = Math.max(0, value);
-                break;
-            case "IIRBaseNonPV":
-                iirBaseReductionNonPV = Math.max(0, value);
                 break;
             case "IIRMinPVDepth":
                 iirMinPVDepth = Math.max(0, value);

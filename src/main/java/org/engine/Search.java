@@ -78,10 +78,9 @@ public final class Search {
 	private final int lmpBaseThreshold;
 	private final int lmpPerDepth;
 
-	// Internal Iterative Reductions (IIR) configuration
-	private final int iirMinDepth;           // minimum depth to allow IIR
-	private final int iirBaseReductionPV;    // base reduction for PV nodes
-	private final int iirBaseReductionNonPV; // base reduction for expected cut-nodes (non-PV)
+	private final int iirMinDepth;
+	private final int iirMinPVDepth;
+	private final int iirMinCutDepth;
 
 	private final double lmrBase;
 	private final double lmrDivisor;
@@ -108,8 +107,8 @@ public final class Search {
 		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
 		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
 		this.iirMinDepth = Math.max(0, spsa.iirMinDepth);
-		this.iirBaseReductionPV = Math.max(0, spsa.iirBaseReductionPV);
-		this.iirBaseReductionNonPV = Math.max(0, spsa.iirBaseReductionNonPV);
+		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
+		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
 		buildLmrTable();
 	}
 
@@ -315,8 +314,7 @@ public final class Search {
 			int pvThreshold = Math.max(0, iirMinPVDepth);
 			int cutThreshold = Math.max(0, iirMinCutDepth);
 			if (!hasHashMove && ((isPVNode && depth >= pvThreshold) || (cutNode && depth >= cutThreshold))) {
-				int iir = isPVNode ? iirBaseReductionPV : iirBaseReductionNonPV;
-				if (iir > 0) depth = Math.max(1, depth - Math.min(iir, depth - 1));
+				depth--;
 			}
 		}
 
