@@ -260,17 +260,6 @@ public final class Search {
 			se.staticEval = SCORE_NONE;
 		}
 
-		// Internal Iterative Reductions (IIR)
-		if (!inCheck && depth >= iirMinDepth && nodeType != NodeType.rootNode) {
-			int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
-			boolean hasHashMove = tableHit && ttPackedMove != 0;
-			if (!hasHashMove) {
-				int iir = (nodeType == NodeType.pvNode) ? iirBaseReductionPV : iirBaseReductionNonPV;
-				if (tableHit && tableDepth >= depth) iir++;
-				if (iir > 0) depth = Math.max(1, depth - Math.min(iir, depth - 1));
-			}
-		}
-
 		if (depth <= 0) {
 			nodes--;
 			return quiescence(board, ply, alpha, beta, nodeType);
@@ -315,6 +304,19 @@ public final class Search {
 				if (score >= beta) {
 					return score;
 				}
+			}
+		}
+
+		if (!inCheck && nodeType != NodeType.rootNode) {
+			boolean isPVNode = (nodeType != NodeType.nonPVNode);
+			boolean cutNode = (!isPVNode) && (beta == alpha + 1);
+			int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
+			boolean hasHashMove = tableHit && ttPackedMove != 0;
+			int pvThreshold = Math.max(0, iirMinPVDepth);
+			int cutThreshold = Math.max(0, iirMinCutDepth);
+			if (!hasHashMove && ((isPVNode && depth >= pvThreshold) || (cutNode && depth >= cutThreshold))) {
+				int iir = isPVNode ? iirBaseReductionPV : iirBaseReductionNonPV;
+				if (iir > 0) depth = Math.max(1, depth - Math.min(iir, depth - 1));
 			}
 		}
 

@@ -1,11 +1,6 @@
 package org.engine;
 
 /*
-OpenBench SPSA params (paste into your OpenBench SPSA config)
-
-All parameters below correspond 1:1 to UCI options exposed by this engine.
-Values with a 100 suffix are scaled by 100 (engine divides by 100.0).
-
 NMPBase, int, 2.0, 0.0, 10.0, 0.5, 0.005
 NMPDepthScale100, int, 23.0, 0.0, 200.0, 2.0, 0.005
 NMPEvalMargin, int, 217.0, 1.0, 4000.0, 50.0, 0.003
@@ -21,11 +16,12 @@ LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
 IIRMinDepth, int, 6.0, 0.0, 16.0, 1.0, 0.005
 IIRBasePV, int, 1.0, 0.0, 4.0, 1.0, 0.005
 IIRBaseNonPV, int, 1.0, 0.0, 4.0, 1.0, 0.005
+IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
+IIRMinCutDepth, int, 4.0, 0.0, 16.0, 1.0, 0.005
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
 - LMRDivisor100 -> lmrDivisor = value / 100.0
-- Apply changes by sending ucinewgame (Search is recreated capturing new finals)
 */
 
 public final class SPSA {    
@@ -44,6 +40,8 @@ public final class SPSA {
     public int iirMinDepth = 6;
     public int iirBaseReductionPV = 1;
     public int iirBaseReductionNonPV = 1;
+    public int iirMinPVDepth = 2;
+    public int iirMinCutDepth = 4;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -62,7 +60,7 @@ public final class SPSA {
                 futilityMarginPerDepth = Math.max(0, value);
                 break;
             case "QSeeMargin":
-                qseeMargin = value; // allow negative margins
+                qseeMargin = value;
                 break;
             case "NMPBase":
                 nmpBase = Math.max(0, value);
@@ -93,6 +91,12 @@ public final class SPSA {
                 break;
             case "IIRBaseNonPV":
                 iirBaseReductionNonPV = Math.max(0, value);
+                break;
+            case "IIRMinPVDepth":
+                iirMinPVDepth = Math.max(0, value);
+                break;
+            case "IIRMinCutDepth":
+                iirMinCutDepth = Math.max(0, value);
                 break;
             default:
                 break;
