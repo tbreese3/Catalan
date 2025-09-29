@@ -7,12 +7,13 @@ NMPEvalMargin, int, 217.0, 1.0, 4000.0, 50.0, 0.003
 NMPEvalMax, int, 4.0, 0.0, 10.0, 0.5, 0.005
 LMRBase100, int, 79.0, 0.0, 300.0, 5.0, 0.003
 LMRDivisor100, int, 215.0, 1.0, 1000.0, 10.0, 0.003
-FUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
-FUTMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
+ReverseFUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
+ReverseFUTMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
 QSeeMargin, int, -9.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
 LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
+LMPMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 4.0, 0.0, 16.0, 1.0, 0.005
 
@@ -24,8 +25,9 @@ Notes:
 public final class SPSA {    
     public double lmrBase = 0.79;
     public double lmrDivisor = 2.15;
-    public int futilityMaxDepth = 3;
-    public int futilityMarginPerDepth = 124;
+    public int reverseFutilityMaxDepth = 3;
+    public int reverseFutilityMarginPerDepth = 124;
+    public int lmpMarginPerDepth = reverseFutilityMarginPerDepth;
     public int qseeMargin = -9;
     public int nmpBase = 2;
     public double nmpDepthScale = 0.23;
@@ -47,11 +49,14 @@ public final class SPSA {
             case "LMRDivisor100":
                 lmrDivisor = Math.max(0.01, value / 100.0);
                 break;
-            case "FUTMaxDepth":
-                futilityMaxDepth = Math.max(0, value);
+            case "ReverseFUTMaxDepth":
+                reverseFutilityMaxDepth = Math.max(0, value);
                 break;
-            case "FUTMarginPerDepth":
-                futilityMarginPerDepth = Math.max(0, value);
+            case "ReverseFUTMarginPerDepth":
+                reverseFutilityMarginPerDepth = Math.max(0, value);
+                break;
+            case "LMPMarginPerDepth":
+                lmpMarginPerDepth = Math.max(0, value);
                 break;
             case "QSeeMargin":
                 qseeMargin = value;
