@@ -3,19 +3,19 @@ package org.engine;
 /*
 NMPBase, int, 2.0, 0.0, 10.0, 0.5, 0.005
 NMPDepthScale100, int, 23.0, 0.0, 200.0, 2.0, 0.005
-NMPEvalMargin, int, 217.0, 1.0, 4000.0, 50.0, 0.003
+NMPEvalMargin, int, 241.0, 1.0, 4000.0, 50.0, 0.003
 NMPEvalMax, int, 4.0, 0.0, 10.0, 0.5, 0.005
-LMRBase100, int, 79.0, 0.0, 300.0, 5.0, 0.003
-LMRDivisor100, int, 215.0, 1.0, 1000.0, 10.0, 0.003
+LMRBase100, int, 77.0, 0.0, 300.0, 5.0, 0.003
+LMRDivisor100, int, 216.0, 1.0, 1000.0, 10.0, 0.003
 ReverseFUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
-ReverseFUTMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
-QSeeMargin, int, -9.0, -1024.0, 1024.0, 8.0, 0.003
+ReverseFUTMarginPerDepth, int, 111.0, 0.0, 1024.0, 16.0, 0.003
+QSeeMargin, int, -7.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
-LMPPerDepth, int, 2.0, 0.0, 16.0, 1.0, 0.00333333
-LMPMarginPerDepth, int, 124.0, 0.0, 1024.0, 16.0, 0.003
+LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
+LMPMarginPerDepth, int, 129.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
-IIRMinCutDepth, int, 4.0, 0.0, 16.0, 1.0, 0.005
+IIRMinCutDepth, int, 3.0, 0.0, 16.0, 1.0, 0.005
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -23,21 +23,21 @@ Notes:
 */
 
 public final class SPSA {    
-    public double lmrBase = 0.79;
-    public double lmrDivisor = 2.15;
+    public double lmrBase = 0.77;
+    public double lmrDivisor = 2.16;
     public int reverseFutilityMaxDepth = 3;
-    public int reverseFutilityMarginPerDepth = 124;
-    public int lmpMarginPerDepth = reverseFutilityMarginPerDepth;
-    public int qseeMargin = -9;
+    public int reverseFutilityMarginPerDepth = 111;
+    public int lmpMarginPerDepth = 129;
+    public int qseeMargin = -7;
     public int nmpBase = 2;
     public double nmpDepthScale = 0.23;
-    public int nmpEvalMargin = 217;
+    public int nmpEvalMargin = 241;
     public int nmpEvalMax = 4;
     public int lmpMaxDepth = 3;
     public int lmpBaseThreshold = 4;
-    public int lmpPerDepth = 2;
+    public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
-    public int iirMinCutDepth = 4;
+    public int iirMinCutDepth = 3;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -55,9 +55,6 @@ public final class SPSA {
             case "ReverseFUTMarginPerDepth":
                 reverseFutilityMarginPerDepth = Math.max(0, value);
                 break;
-            case "LMPMarginPerDepth":
-                lmpMarginPerDepth = Math.max(0, value);
-                break;
             case "QSeeMargin":
                 qseeMargin = value;
                 break;
@@ -72,6 +69,9 @@ public final class SPSA {
                 break;
             case "NMPEvalMax":
                 nmpEvalMax = Math.max(0, value);
+                break;
+            case "LMPMarginPerDepth":
+                lmpMarginPerDepth = Math.max(0, value);
                 break;
             case "LMPMaxDepth":
                 lmpMaxDepth = Math.max(0, value);
