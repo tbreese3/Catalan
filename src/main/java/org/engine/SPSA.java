@@ -27,7 +27,7 @@ public final class SPSA {
     public double lmrDivisor = 2.15;
     public int reverseFutilityMaxDepth = 3;
     public int reverseFutilityMarginPerDepth = 124;
-    public int lmpMarginPerDepth = reverseFutilityMarginPerDepth;
+    public int lmpMarginPerDepth = 124;
     public int qseeMargin = -9;
     public int nmpBase = 2;
     public double nmpDepthScale = 0.23;
@@ -55,9 +55,6 @@ public final class SPSA {
             case "ReverseFUTMarginPerDepth":
                 reverseFutilityMarginPerDepth = Math.max(0, value);
                 break;
-            case "LMPMarginPerDepth":
-                lmpMarginPerDepth = Math.max(0, value);
-                break;
             case "QSeeMargin":
                 qseeMargin = value;
                 break;
@@ -72,6 +69,9 @@ public final class SPSA {
                 break;
             case "NMPEvalMax":
                 nmpEvalMax = Math.max(0, value);
+                break;
+            case "LMPMarginPerDepth":
+                lmpMarginPerDepth = Math.max(0, value);
                 break;
             case "LMPMaxDepth":
                 lmpMaxDepth = Math.max(0, value);
