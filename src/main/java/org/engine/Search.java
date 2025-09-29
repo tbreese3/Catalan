@@ -78,6 +78,9 @@ public final class Search {
 	private final int lmpBaseThreshold;
 	private final int lmpPerDepth;
 
+	private final int iirMinPVDepth;
+	private final int iirMinCutDepth;
+
 	private final double lmrBase;
 	private final double lmrDivisor;
 	private final int futilityMaxDepth;
@@ -102,6 +105,8 @@ public final class Search {
 		this.lmpMaxDepth = Math.max(0, spsa.lmpMaxDepth);
 		this.lmpBaseThreshold = Math.max(0, spsa.lmpBaseThreshold);
 		this.lmpPerDepth = Math.max(0, spsa.lmpPerDepth);
+		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
+		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
 		buildLmrTable();
 	}
 
@@ -296,6 +301,18 @@ public final class Search {
 				if (score >= beta) {
 					return score;
 				}
+			}
+		}
+
+		if (!inCheck && nodeType != NodeType.rootNode) {
+			boolean isPVNode = (nodeType != NodeType.nonPVNode);
+			boolean cutNode = (!isPVNode) && (beta == alpha + 1);
+			int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
+			boolean hasHashMove = tableHit && ttPackedMove != 0;
+			int pvThreshold = Math.max(0, iirMinPVDepth);
+			int cutThreshold = Math.max(0, iirMinCutDepth);
+			if (!hasHashMove && ((isPVNode && depth >= pvThreshold) || (cutNode && depth >= cutThreshold))) {
+				depth--;
 			}
 		}
 
