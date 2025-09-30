@@ -12,7 +12,6 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
-	private static final int MOVE_NULL = -1;
 
 	public static final class Limits {
 		public int depth = -1;
@@ -287,7 +286,7 @@ public final class Search {
 			}
 		}
 
-		boolean prevWasNull = (ply > 0) && (stack[ply - 1].move == MOVE_NULL);
+		boolean prevWasNull = (ply > 0) && (stack[ply - 1].move == MoveFactory.MOVE_NONE);
 		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3 && !prevWasNull) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int evalBonus = 0;
@@ -299,7 +298,7 @@ public final class Search {
 				}
 				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
 				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
-				stack[ply].move = MOVE_NULL;
+				stack[ply].move = MoveFactory.MOVE_NONE;
 				pos.makeNullMoveInPlace(board);
 				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				pos.undoNullMoveInPlace(board);
