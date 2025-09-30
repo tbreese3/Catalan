@@ -286,7 +286,8 @@ public final class Search {
 			}
 		}
 
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3) {
+		boolean prevWasNull = (ply > 0) && (stack[ply - 1].move == MoveFactory.MOVE_NONE);
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3 && !prevWasNull) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int evalBonus = 0;
 				if (Math.abs(beta) < MATE_VALUE) {
@@ -297,6 +298,7 @@ public final class Search {
 				}
 				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
 				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
+				stack[ply].move = MoveFactory.MOVE_NONE;
 				pos.makeNullMoveInPlace(board);
 				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				pos.undoNullMoveInPlace(board);
@@ -370,6 +372,7 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
+			stack[ply].move = move;
 			int score;
 			if (childPv) {
 				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
