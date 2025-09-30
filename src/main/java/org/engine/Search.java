@@ -88,7 +88,6 @@ public final class Search {
 	private final int seMarginPerDepth;
 	private final int seDoubleMargin;
 	private final int seTripleMargin;
-	private final int sePlyLimit;
 
 	private final double lmrBase;
 	private final double lmrDivisor;
@@ -125,7 +124,6 @@ public final class Search {
 		this.seMarginPerDepth = Math.max(1, spsa.seMarginPerDepth);
 		this.seDoubleMargin = Math.max(1, spsa.seDoubleMargin);
 		this.seTripleMargin = Math.max(1, spsa.seTripleMargin);
-		this.sePlyLimit = Math.max(0, spsa.sePlyLimit);
 		buildLmrTable();
 	}
 
@@ -242,8 +240,8 @@ public final class Search {
 
 	private int negamax(long[] board, int depth, int ply, int alpha, int beta, NodeType nodeType) {
 		StackEntry se = stack[ply];
-		se.pvLength = 0;
-		se.extension = 0;
+        se.pvLength = 0;
+        se.extension = 0;
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
@@ -268,7 +266,9 @@ public final class Search {
                 boolean boundAllows = (tableScore >= beta)
                         ? ((tableBound & TranspositionTable.BOUND_LOWER) != 0)
                         : ((tableBound & TranspositionTable.BOUND_UPPER) != 0);
-                if (boundAllows) return tableScore;
+                int ttMoveCut = MoveFactory.intToMove(entry.getPackedMove());
+                boolean excludeBlocksCutoff = (stack[ply].excludedMove != MoveFactory.MOVE_NONE) && (ttMoveCut == stack[ply].excludedMove);
+                if (boundAllows && !excludeBlocksCutoff) return tableScore;
             }
 		}
 
@@ -330,8 +330,12 @@ public final class Search {
 		if (!inCheck && nodeType != NodeType.rootNode) {
 			boolean isPVNode = (nodeType != NodeType.nonPVNode);
 			boolean cutNode = (!isPVNode) && (beta == alpha + 1);
-			int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
-			boolean hasHashMove = tableHit && ttPackedMove != 0;
+            int ttPackedMove = tableHit ? (entry.getPackedMove() & 0xFFFF) : 0;
+            boolean hasHashMove = tableHit && ttPackedMove != 0;
+            if (stack[ply].excludedMove != MoveFactory.MOVE_NONE) {
+                int ttMoveEx = MoveFactory.intToMove(entry.getPackedMove());
+                if (ttMoveEx == stack[ply].excludedMove) hasHashMove = false;
+            }
 			int pvThreshold = Math.max(0, iirMinPVDepth);
 			int cutThreshold = Math.max(0, iirMinCutDepth);
 			if (!hasHashMove && ((isPVNode && depth >= pvThreshold) || (cutNode && depth >= cutThreshold))) {
@@ -339,8 +343,10 @@ public final class Search {
 			}
 		}
 
-		int[] moves = moveBuffers[ply];
-		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
+        int[] moves = moveBuffers[ply];
+        int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
+        if (se.excludedMove != MoveFactory.MOVE_NONE && ttMoveForNode == se.excludedMove)
+            ttMoveForNode = MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
 		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
 
@@ -354,37 +360,44 @@ public final class Search {
 
 		if (move == se.excludedMove) continue;
 
-		boolean isQuiet = PositionFactory.isQuiet(board, move);
+        boolean isQuiet = PositionFactory.isQuiet(board, move);
 
-		int extension = 0;
-		boolean allowExtensions = nodeType != NodeType.rootNode && (sePlyLimit == 0 || ply < depth * sePlyLimit);
-		
-		if (allowExtensions && move == ttMoveForNode && !inCheck && se.excludedMove == MoveFactory.MOVE_NONE && depth >= seMinDepth) {
-			if (tableHit && tableDepth >= depth - 3 && (tableBound & TranspositionTable.BOUND_LOWER) != 0 && Math.abs(tableScore) < MATE_VALUE - MAX_PLY) {
-				int singularBeta = tableScore - depth * seMarginPerDepth;
-				int singularDepth = (depth - 1) / 2;
-				
-				se.excludedMove = move;
-				int singularValue = negamax(board, singularDepth, ply, singularBeta - 1, singularBeta, NodeType.nonPVNode);
-				se.excludedMove = MoveFactory.MOVE_NONE;
-				
-				if (singularValue < singularBeta) {
-					extension = 1;
-					if (!tableWasPv && singularValue < singularBeta - seDoubleMargin && se.extension <= 6) {
-						extension = 2;
-						if (singularValue < singularBeta - seTripleMargin) {
-							extension = 3;
-						}
-					}
-				} else if (singularBeta >= beta) {
-					return singularBeta;
-				} else if (tableScore >= beta) {
-					extension = -2;
-				} else if (nodeType == NodeType.nonPVNode && beta == alpha + 1 && tableScore <= alpha) {
-					extension = -1;
-				}
-			}
-		}
+        int extension = 0;
+        if (!inCheck
+                && move == ttMoveForNode
+                && se.excludedMove == MoveFactory.MOVE_NONE
+                && depth >= seMinDepth
+                && nodeType != NodeType.rootNode
+                && tableHit
+                && tableDepth >= depth - 3
+                && (tableBound & TranspositionTable.BOUND_LOWER) != 0
+                && Math.abs(tableScore) < MATE_VALUE - MAX_PLY) {
+            int singularBeta = tableScore - Math.max(1, seMarginPerDepth) * depth;
+            int singularDepth = Math.max(1, (depth - 1) / 2);
+
+            se.excludedMove = move;
+            int singularValue = negamax(board, singularDepth, ply, singularBeta - 1, singularBeta, NodeType.nonPVNode);
+            se.excludedMove = MoveFactory.MOVE_NONE;
+
+            if (singularValue < singularBeta) {
+                extension = 1;
+                if (!tableWasPv && singularValue < singularBeta - seDoubleMargin && se.extension <= 6) {
+                    extension = 2;
+                    if (singularValue < singularBeta - seTripleMargin) {
+                        extension = 3;
+                    }
+                }
+            } else if (singularBeta >= beta) {
+                // Multicut: other moves likely good too, cut here
+                return singularBeta;
+            } else if (tableScore >= beta) {
+                // Expected fail-high, reduce more aggressively
+                extension = -2;
+            } else if (nodeType == NodeType.nonPVNode && beta == alpha + 1 && tableScore <= alpha) {
+                // Expected fail-low at cut-nodes
+                extension = -1;
+            }
+        }
 
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
@@ -418,17 +431,17 @@ public final class Search {
 				}
 			}
 
-	int searchDepthChild = depth - 1 + extension;
-	int appliedReduction = 0;
-	boolean parentIsPV = (nodeType != NodeType.nonPVNode);
-	boolean childPv = parentIsPV && i == 0;
-	
-	// Track extensions for limiting excessive double extensions
-	if (extension == 2 && ply + 1 < stack.length) {
-		stack[ply + 1].extension = se.extension + 1;
-	}
-	
-	if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+        int baseChildDepth = Math.max(1, depth - 1 + extension);
+        int searchDepthChild = baseChildDepth;
+		int appliedReduction = 0;
+		boolean parentIsPV = (nodeType != NodeType.nonPVNode);
+		boolean childPv = parentIsPV && i == 0;
+		
+        if (extension > 0 && ply + 1 < stack.length) {
+            stack[ply + 1].extension = se.extension + extension;
+        }
+		
+		if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
@@ -439,11 +452,11 @@ public final class Search {
 				else if (hVal > 1024) r = Math.max(0, r - 1);
 
 				if (hVal < -4096) r += 1;
-				if (r > 0) {
-					appliedReduction = Math.min(r, depth - 1);
-					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
-					se.reduction = appliedReduction;
-				}
+                if (r > 0) {
+                    appliedReduction = Math.min(r, baseChildDepth - 1);
+                    searchDepthChild = Math.max(1, baseChildDepth - appliedReduction);
+                    se.reduction = appliedReduction;
+                }
 			}
 
 			Eval.doMoveAccumulator(nnueState, board, move);
@@ -511,8 +524,9 @@ public final class Search {
 	}
 
 	private int quiescence(long[] board, int ply, int alpha, int beta, NodeType nodeType) {
-		StackEntry se = stack[ply];
-		se.pvLength = 0;
+        StackEntry se = stack[ply];
+        se.pvLength = 0;
+        se.extension = 0;
 		if (stopCheck()) return 0;
 		nodes++;
 		selDepth = Math.max(selDepth, ply);
