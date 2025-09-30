@@ -299,7 +299,7 @@ public final class Search {
 				}
 				int depthBonus = (int) Math.floor(depth * nmpDepthScale);
 				int R = Math.max(1, nmpBase + depthBonus + evalBonus);
-				stack[ply + 1].move = MOVE_NULL;
+				stack[ply].move = MOVE_NULL;
 				pos.makeNullMoveInPlace(board);
 				int score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, NodeType.nonPVNode);
 				pos.undoNullMoveInPlace(board);
@@ -373,7 +373,7 @@ public final class Search {
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
-			stack[ply + 1].move = move;
+			stack[ply].move = move;
 			int score;
 			if (childPv) {
 				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
