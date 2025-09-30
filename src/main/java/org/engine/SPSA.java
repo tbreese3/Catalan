@@ -18,10 +18,18 @@ LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
 LMPMarginPerDepth, int, 129.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 3.0, 0.0, 16.0, 1.0, 0.005
+SEMinDepth, int, 8.0, 4.0, 16.0, 1.0, 0.005
+SEMarginPerDepth, int, 3.0, 1.0, 8.0, 0.5, 0.005
+SEDoubleMargin, int, 24.0, 8.0, 64.0, 4.0, 0.005
+SETripleMargin, int, 80.0, 32.0, 128.0, 8.0, 0.005
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
 - LMRDivisor100 -> lmrDivisor = value / 100.0
+- SEMinDepth: Minimum depth to trigger singular extension
+- SEMarginPerDepth: Margin per depth for singular verification search
+- SEDoubleMargin: Additional margin threshold for double extension
+- SETripleMargin: Additional margin threshold for triple extension
 */
 
 public final class SPSA {    
@@ -42,6 +50,10 @@ public final class SPSA {
     public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
+    public int seMinDepth = 8;
+    public int seMarginPerDepth = 3;
+    public int seDoubleMargin = 24;
+    public int seTripleMargin = 80;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -97,6 +109,18 @@ public final class SPSA {
                 break;
             case "IIRMinCutDepth":
                 iirMinCutDepth = Math.max(0, value);
+                break;
+            case "SEMinDepth":
+                seMinDepth = Math.max(0, value);
+                break;
+            case "SEMarginPerDepth":
+                seMarginPerDepth = Math.max(1, value);
+                break;
+            case "SEDoubleMargin":
+                seDoubleMargin = Math.max(1, value);
+                break;
+            case "SETripleMargin":
+                seTripleMargin = Math.max(1, value);
                 break;
             default:
                 break;

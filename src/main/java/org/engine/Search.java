@@ -36,6 +36,7 @@ public final class Search {
 		int searchKiller;
 		int staticEval;
 		int reduction;
+		int extension;
 
 		StackEntry() {
 			this.pv = new int[MAX_PLY];
@@ -46,6 +47,7 @@ public final class Search {
 			this.searchKiller = MoveFactory.MOVE_NONE;
 			this.staticEval = SCORE_NONE;
 			this.reduction = 0;
+			this.extension = 0;
 		}
 	}
 
@@ -82,6 +84,11 @@ public final class Search {
 	private final int iirMinPVDepth;
 	private final int iirMinCutDepth;
 
+	private final int seMinDepth;
+	private final int seMarginPerDepth;
+	private final int seDoubleMargin;
+	private final int seTripleMargin;
+
 	private final double lmrBase;
 	private final double lmrDivisor;
 	private final int reverseFutilityMaxDepth;
@@ -113,6 +120,10 @@ public final class Search {
 		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
+		this.seMinDepth = Math.max(0, spsa.seMinDepth);
+		this.seMarginPerDepth = Math.max(1, spsa.seMarginPerDepth);
+		this.seDoubleMargin = Math.max(1, spsa.seDoubleMargin);
+		this.seTripleMargin = Math.max(1, spsa.seTripleMargin);
 		buildLmrTable();
 	}
 
@@ -169,6 +180,7 @@ public final class Search {
 				e.searchKiller = MoveFactory.MOVE_NONE;
 				e.staticEval = SCORE_NONE;
 				e.reduction = 0;
+				e.extension = 0;
 			}
 
 
@@ -324,6 +336,36 @@ public final class Search {
 			}
 		}
 
+		// Singular Extension
+		int extension = 0;
+		if (!inCheck && se.excludedMove == MoveFactory.MOVE_NONE && depth >= seMinDepth && nodeType != NodeType.rootNode) {
+			if (tableHit && tableDepth >= depth - 3 && (tableBound & TranspositionTable.BOUND_LOWER) != 0 && Math.abs(tableScore) < MATE_VALUE - MAX_PLY) {
+				int ttMoveForSE = MoveFactory.intToMove(entry.getPackedMove());
+				if (!MoveFactory.isNone(ttMoveForSE) && pos.isPseudoLegalMove(board, ttMoveForSE, moveGen)) {
+					int singularBeta = tableScore - depth * seMarginPerDepth;
+					int singularDepth = (depth - 1) / 2;
+					
+					se.excludedMove = ttMoveForSE;
+					int singularValue = negamax(board, singularDepth, ply, singularBeta - 1, singularBeta, NodeType.nonPVNode);
+					se.excludedMove = MoveFactory.MOVE_NONE;
+					
+					if (singularValue < singularBeta) {
+						extension = 1;
+						if (!tableWasPv && singularValue < singularBeta - seDoubleMargin && se.extension <= 6) {
+							extension = 2;
+							if (singularValue < singularBeta - seTripleMargin) {
+								extension = 3;
+							}
+						}
+					} else if (singularBeta >= beta) {
+						return singularBeta;
+					} else if (tableScore >= beta) {
+						extension = -1;
+					}
+				}
+			}
+		}
+
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
@@ -333,11 +375,13 @@ public final class Search {
 		int originalAlpha = alpha;
 		int bestScore = -INFTY;
 		int i = 0;
-		int quietsTried = 0;
-		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
-			if (stopCheck()) break;
+	int quietsTried = 0;
+	for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
+		if (stopCheck()) break;
 
-			boolean isQuiet = PositionFactory.isQuiet(board, move);
+		if (move == se.excludedMove) continue;
+
+		boolean isQuiet = PositionFactory.isQuiet(board, move);
 
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
@@ -371,11 +415,16 @@ public final class Search {
 				}
 			}
 
-			int searchDepthChild = depth - 1;
-			int appliedReduction = 0;
-			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
-			boolean childPv = parentIsPV && i == 0;
-			if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+		int searchDepthChild = depth - 1 + extension;
+		int appliedReduction = 0;
+		boolean parentIsPV = (nodeType != NodeType.nonPVNode);
+		boolean childPv = parentIsPV && i == 0;
+		
+		if (extension > 0 && ply + 1 < stack.length) {
+			stack[ply + 1].extension = se.extension + extension;
+		}
+		
+		if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];

@@ -52,6 +52,10 @@ public class UCI {
                     System.out.println("option name LMPMarginPerDepth type spin default " + spsa.lmpMarginPerDepth + " min 0 max 1024");
                     System.out.println("option name IIRMinPVDepth type spin default " + spsa.iirMinPVDepth + " min 0 max 16");
                     System.out.println("option name IIRMinCutDepth type spin default " + spsa.iirMinCutDepth + " min 0 max 16");
+                    System.out.println("option name SEMinDepth type spin default " + spsa.seMinDepth + " min 4 max 16");
+                    System.out.println("option name SEMarginPerDepth type spin default " + spsa.seMarginPerDepth + " min 1 max 8");
+                    System.out.println("option name SEDoubleMargin type spin default " + spsa.seDoubleMargin + " min 8 max 64");
+                    System.out.println("option name SETripleMargin type spin default " + spsa.seTripleMargin + " min 32 max 128");
                 }
                 System.out.println("uciok");
             } else if (line.equals("isready")) {
