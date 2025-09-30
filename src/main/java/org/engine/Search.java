@@ -12,7 +12,7 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
-	private static final int SINGULAR_MIN_DEPTH = 7;
+    // Replaced by tunables in SPSA
 
 	public static final class Limits {
 		public int depth = -1;
@@ -94,6 +94,8 @@ public final class Search {
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
 	private final int nmpEvalMax;
+    private final int singularMinDepth;
+    private final int singularMarginPerDepth;
 
 	public Search(SPSA spsa) {
 		if (spsa == null) spsa = new SPSA();
@@ -114,6 +116,9 @@ public final class Search {
 		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
+		// Singular tunables
+        this.singularMinDepth = Math.max(0, spsa.singularMinDepth);
+        this.singularMarginPerDepth = Math.max(0, spsa.singularMarginPerDepth);
 		buildLmrTable();
 	}
 
@@ -381,10 +386,10 @@ public final class Search {
 			int searchDepthChild = depth - 1;
 			int extension = 0;
 
-			if (!se.inCheck && depth >= SINGULAR_MIN_DEPTH && tableHit && move == ttMoveForNode) {
+		if (!se.inCheck && depth >= singularMinDepth && tableHit && move == ttMoveForNode) {
 				boolean ttIsLower = (tableBound & TranspositionTable.BOUND_LOWER) != 0;
 				if (ttIsLower && tableScore != TranspositionTable.SCORE_VOID && Math.abs(tableScore) < MATE_VALUE && tableDepth >= depth - 3) {
-					int singularBeta = tableScore - depth;
+					int singularBeta = tableScore - Math.max(1, singularMarginPerDepth) * depth;
 					int singularDepth = Math.max(1, (depth - 1) / 2);
 
 					int savedPVLen = se.pvLength;
@@ -517,12 +522,13 @@ public final class Search {
         boolean ttHit = pr.hit;
         int ttStaticEval = TranspositionTable.SCORE_VOID;
         boolean ttPV = false;
+		boolean excludedHere = stack[ply].excludedMove != MoveFactory.MOVE_NONE;
         if (ttHit) {
             int ttBound = ttEntry.getBound();
             int ttScore = ttEntry.getScore(ply);
             ttStaticEval = ttEntry.getStaticEval();
             ttPV = ttEntry.wasPV();
-            if (nodeType == NodeType.nonPVNode && ttScore != TranspositionTable.SCORE_VOID) {
+			if (!excludedHere && nodeType == NodeType.nonPVNode && ttScore != TranspositionTable.SCORE_VOID) {
                 boolean boundAllows = (ttScore >= beta)
                         ? ((ttBound & TranspositionTable.BOUND_LOWER) != 0)
                         : ((ttBound & TranspositionTable.BOUND_UPPER) != 0);
@@ -551,11 +557,11 @@ public final class Search {
                 }
             }
 
-            if (standPat >= beta) {
-                if (!ttHit) {
-                    boolean pvHere = (nodeType != NodeType.nonPVNode) || ttPV;
-                    ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_LOWER, 0, 0, standPat, rawEval, pvHere, ply);
-                }
+			if (standPat >= beta) {
+				if (!ttHit && !excludedHere) {
+					boolean pvHere = (nodeType != NodeType.nonPVNode) || ttPV;
+					ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_LOWER, 0, 0, standPat, rawEval, pvHere, ply);
+				}
                 if (Math.abs(standPat) < MATE_VALUE && Math.abs(beta) < MATE_VALUE)
                     return (standPat + beta) / 2;
                 return standPat;
