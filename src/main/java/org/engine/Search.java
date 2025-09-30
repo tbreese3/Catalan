@@ -86,6 +86,8 @@ public final class Search {
 	private final double lmrDivisor;
 	private final int reverseFutilityMaxDepth;
 	private final int reverseFutilityMarginPerDepth;
+	private final int futilityMaxDepth;
+	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
 	private final int nmpBase;
 	private final double nmpDepthScale;
@@ -98,6 +100,8 @@ public final class Search {
 		this.lmrDivisor = spsa.lmrDivisor;
 		this.reverseFutilityMaxDepth = Math.max(0, spsa.reverseFutilityMaxDepth);
 		this.reverseFutilityMarginPerDepth = Math.max(0, spsa.reverseFutilityMarginPerDepth);
+		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
+		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
@@ -334,6 +338,21 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
+
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= futilityMaxDepth && move != ttMoveForNode && move != killer) {
+				int eval = se.staticEval;
+				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
+					int margin = futilityMarginPerDepth * depth;
+					if (eval + margin <= alpha) {
+						boolean givesCheck = pos.givesCheck(board, move, moveGen);
+						if (!givesCheck) {
+							quietsTried++;
+							continue;
+						}
+					}
+				}
+			}
+			
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;

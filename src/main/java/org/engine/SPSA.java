@@ -27,6 +27,8 @@ public final class SPSA {
     public double lmrDivisor = 2.16;
     public int reverseFutilityMaxDepth = 3;
     public int reverseFutilityMarginPerDepth = 111;
+    public int futilityMaxDepth = 2;
+    public int futilityMarginPerDepth = 110;
     public int lmpMarginPerDepth = 129;
     public int qseeMargin = -7;
     public int nmpBase = 2;
@@ -54,6 +56,12 @@ public final class SPSA {
                 break;
             case "ReverseFUTMarginPerDepth":
                 reverseFutilityMarginPerDepth = Math.max(0, value);
+                break;
+            case "FUTMaxDepth":
+                futilityMaxDepth = Math.max(0, value);
+                break;
+            case "FUTMarginPerDepth":
+                futilityMarginPerDepth = Math.max(0, value);
                 break;
             case "QSeeMargin":
                 qseeMargin = value;

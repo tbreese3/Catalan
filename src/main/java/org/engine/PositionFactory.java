@@ -718,6 +718,17 @@ public final class PositionFactory {
     return pieceAt(bb, to) == -1;
   }
 
+  public boolean givesCheck(long[] bb, int mv) {
+    return givesCheck(bb, mv, new MoveGenerator());
+  }
+
+  public boolean givesCheck(long[] bb, int mv, MoveGenerator gen) {
+    if (!makeMoveInPlace(bb, mv, gen)) return false;
+    boolean check = isInCheck(bb);
+    undoMoveInPlace(bb);
+    return check;
+  }
+
   public boolean isPseudoLegalMove(long[] bb, int mv, MoveGenerator gen) {
     int m = MoveFactory.intToMove(mv);
     if (MoveFactory.isNone(m)) return false;
