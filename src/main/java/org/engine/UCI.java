@@ -43,6 +43,8 @@ public class UCI {
                     System.out.println("option name LMRDivisor100 type spin default " + (int)Math.round(spsa.lmrDivisor * 100) + " min 1 max 1000");
                     System.out.println("option name ReverseFUTMaxDepth type spin default " + spsa.reverseFutilityMaxDepth + " min 0 max 8");
                     System.out.println("option name ReverseFUTMarginPerDepth type spin default " + spsa.reverseFutilityMarginPerDepth + " min 0 max 1024");
+                    System.out.println("option name FUTMaxDepth type spin default " + spsa.futilityMaxDepth + " min 0 max 8");
+                    System.out.println("option name FUTMarginPerDepth type spin default " + spsa.futilityMarginPerDepth + " min 0 max 1024");
                     System.out.println("option name QSeeMargin type spin default " + spsa.qseeMargin + " min -1024 max 1024");
                     System.out.println("option name LMPMaxDepth type spin default " + spsa.lmpMaxDepth + " min 0 max 8");
                     System.out.println("option name LMPBaseThreshold type spin default " + spsa.lmpBaseThreshold + " min 0 max 64");

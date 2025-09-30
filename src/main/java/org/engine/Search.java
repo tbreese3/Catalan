@@ -86,6 +86,8 @@ public final class Search {
 	private final double lmrDivisor;
 	private final int reverseFutilityMaxDepth;
 	private final int reverseFutilityMarginPerDepth;
+	private final int futilityMaxDepth;
+	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
 	private final int nmpBase;
 	private final double nmpDepthScale;
@@ -98,6 +100,8 @@ public final class Search {
 		this.lmrDivisor = spsa.lmrDivisor;
 		this.reverseFutilityMaxDepth = Math.max(0, spsa.reverseFutilityMaxDepth);
 		this.reverseFutilityMarginPerDepth = Math.max(0, spsa.reverseFutilityMarginPerDepth);
+		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
+		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
@@ -334,6 +338,27 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
+
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
+				int eval = se.staticEval;
+				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
+					int dIdxF = Math.min(depth, LMR_MAX_DEPTH);
+					int mIdxF = Math.min(i + 1, LMR_MAX_MOVES);
+					int lmrR = lmrTable[dIdxF][mIdxF];
+					int lmrDepth = Math.max(0, depth - lmrR);
+					if (lmrDepth <= futilityMaxDepth) {
+						int margin = futilityMarginPerDepth * Math.max(1, lmrDepth);
+						if (eval + margin <= alpha) {
+							boolean givesCheck = pos.givesCheck(board, move, moveGen);
+							if (!givesCheck) {
+								quietsTried++;
+								continue;
+							}
+						}
+					}
+				}
+			}
+			
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;
@@ -415,7 +440,11 @@ public final class Search {
 			}
 		}
 
-		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
+		if (!movePlayed) {
+			if (inCheck) return -MATE_VALUE + ply;
+			int anyLegal = moveGen.getFirstLegalMove(board);
+			return anyLegal != 0 ? alpha : 0;
+		}
 
         int resultBound = bestScore >= beta ? TranspositionTable.BOUND_LOWER : (bestScore > originalAlpha ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER);
 
