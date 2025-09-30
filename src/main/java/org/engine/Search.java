@@ -339,15 +339,21 @@ public final class Search {
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
 
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= futilityMaxDepth && move != ttMoveForNode && move != killer) {
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
-					int margin = futilityMarginPerDepth * depth;
-					if (eval + margin <= alpha) {
-						boolean givesCheck = pos.givesCheck(board, move, moveGen);
-						if (!givesCheck) {
-							quietsTried++;
-							continue;
+					int dIdxF = Math.min(depth, LMR_MAX_DEPTH);
+					int mIdxF = Math.min(i + 1, LMR_MAX_MOVES);
+					int lmrR = lmrTable[dIdxF][mIdxF];
+					int lmrDepth = Math.max(0, depth - lmrR);
+					if (lmrDepth <= futilityMaxDepth) {
+						int margin = futilityMarginPerDepth * Math.max(1, lmrDepth);
+						if (eval + margin <= alpha) {
+							boolean givesCheck = pos.givesCheck(board, move, moveGen);
+							if (!givesCheck) {
+								quietsTried++;
+								continue;
+							}
 						}
 					}
 				}
