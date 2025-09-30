@@ -341,7 +341,7 @@ public final class Search {
 
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= futilityMaxDepth && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
-				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
+				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
 					int margin = futilityMarginPerDepth * depth;
 					if (eval + margin <= alpha) {
 						boolean givesCheck = pos.givesCheck(board, move, moveGen);
@@ -434,7 +434,11 @@ public final class Search {
 			}
 		}
 
-		if (!movePlayed) return inCheck ? (-MATE_VALUE + ply) : 0;
+		if (!movePlayed) {
+			if (inCheck) return -MATE_VALUE + ply;
+			int anyLegal = moveGen.getFirstLegalMove(board);
+			return anyLegal != 0 ? alpha : 0;
+		}
 
         int resultBound = bestScore >= beta ? TranspositionTable.BOUND_LOWER : (bestScore > originalAlpha ? TranspositionTable.BOUND_EXACT : TranspositionTable.BOUND_UPPER);
 
