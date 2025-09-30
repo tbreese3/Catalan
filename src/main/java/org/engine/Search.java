@@ -13,6 +13,10 @@ public final class Search {
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
 
+	private final int singularMinDepth;
+	private final int singularMarginPerDepth;
+	private final int singularSearchReduction;
+
 	public static final class Limits {
 		public int depth = -1;
 		public long softMs = 0L;
@@ -109,6 +113,9 @@ public final class Search {
 		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
+		this.singularMinDepth = Math.max(0, spsa.singularMinDepth);
+		this.singularMarginPerDepth = Math.max(0, spsa.singularMarginPerDepth);
+		this.singularSearchReduction = Math.max(0, spsa.singularSearchReduction);
 		buildLmrTable();
 	}
 
@@ -245,7 +252,7 @@ public final class Search {
             tableBound = entry.getBound();
             tableEval = entry.getStaticEval();
             tableWasPv = entry.wasPV();
-            if (nodeType == NodeType.nonPVNode && tableScore != TranspositionTable.SCORE_VOID && tableDepth >= depth) {
+            if (nodeType == NodeType.nonPVNode && tableScore != TranspositionTable.SCORE_VOID && tableDepth >= depth && stack[ply].excludedMove == MoveFactory.MOVE_NONE) {
                 boolean boundAllows = (tableScore >= beta)
                         ? ((tableBound & TranspositionTable.BOUND_LOWER) != 0)
                         : ((tableBound & TranspositionTable.BOUND_UPPER) != 0);
@@ -287,7 +294,8 @@ public final class Search {
 		}
 
 		boolean prevWasNull = (ply > 0) && (stack[ply - 1].move == MoveFactory.MOVE_NONE);
-		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3 && !prevWasNull) {
+		boolean isExcludedSearch = (stack[ply].excludedMove != MoveFactory.MOVE_NONE);
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth >= 3 && !prevWasNull && !isExcludedSearch) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
 				int evalBonus = 0;
 				if (Math.abs(beta) < MATE_VALUE) {
@@ -323,7 +331,32 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, stack[ply].excludedMove, /*includeQuiets=*/true);
+
+		boolean singularExtendTT = false;
+		int singularExtendMove = MoveFactory.MOVE_NONE;
+		boolean isCutNode = (nodeType == NodeType.nonPVNode) && (beta == alpha + 1);
+		if (!inCheck
+				&& !isExcludedSearch
+				&& isCutNode
+				&& depth >= singularMinDepth
+				&& ttMoveForNode != MoveFactory.MOVE_NONE
+				&& tableHit
+				&& tableScore != TranspositionTable.SCORE_VOID
+				&& (tableBound & TranspositionTable.BOUND_LOWER) != 0
+				&& tableDepth >= depth - 1) {
+			int margin = singularMarginPerDepth * depth;
+			int singularBeta = tableScore - margin;
+			int excludeDepth = Math.max(1, depth - 1 - Math.max(0, singularSearchReduction));
+			int savedExcluded = stack[ply].excludedMove;
+			stack[ply].excludedMove = ttMoveForNode;
+			int exclScore = negamax(board, excludeDepth, ply, singularBeta - 1, singularBeta, NodeType.nonPVNode);
+			stack[ply].excludedMove = savedExcluded;
+			if (exclScore < singularBeta) {
+				singularExtendTT = true;
+				singularExtendMove = ttMoveForNode;
+			}
+		}
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -347,6 +380,9 @@ public final class Search {
 			}
 
 			int searchDepthChild = depth - 1;
+			if (move == singularExtendMove) {
+				searchDepthChild = depth;
+			}
 			int appliedReduction = 0;
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
@@ -496,7 +532,7 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, stack[ply].excludedMove, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;

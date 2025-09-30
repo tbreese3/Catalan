@@ -38,6 +38,9 @@ public final class SPSA {
     public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
+    public int singularMinDepth = 5;
+    public int singularMarginPerDepth = 8;
+    public int singularSearchReduction = 1;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -87,6 +90,15 @@ public final class SPSA {
                 break;
             case "IIRMinCutDepth":
                 iirMinCutDepth = Math.max(0, value);
+                break;
+            case "SingularMinDepth":
+                singularMinDepth = Math.max(0, value);
+                break;
+            case "SingularMarginPerDepth":
+                singularMarginPerDepth = Math.max(0, value);
+                break;
+            case "SingularSearchReduction":
+                singularSearchReduction = Math.max(0, value);
                 break;
             default:
                 break;
