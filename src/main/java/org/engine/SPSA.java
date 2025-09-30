@@ -18,10 +18,14 @@ LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
 LMPMarginPerDepth, int, 129.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 3.0, 0.0, 16.0, 1.0, 0.005
+SEMinDepth, int, 8.0, 4.0, 16.0, 1.0, 0.005
+SEMargin, int, 16.0, 4.0, 64.0, 4.0, 0.003
+SEDepthScale100, int, 50.0, 10.0, 100.0, 5.0, 0.003
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
 - LMRDivisor100 -> lmrDivisor = value / 100.0
+- SEDepthScale100 -> seDepthScale = value / 100.0
 */
 
 public final class SPSA {    
@@ -42,6 +46,9 @@ public final class SPSA {
     public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
+    public int seMinDepth = 8;
+    public int seMargin = 16;
+    public double seDepthScale = 0.5;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -97,6 +104,15 @@ public final class SPSA {
                 break;
             case "IIRMinCutDepth":
                 iirMinCutDepth = Math.max(0, value);
+                break;
+            case "SEMinDepth":
+                seMinDepth = Math.max(0, value);
+                break;
+            case "SEMargin":
+                seMargin = Math.max(0, value);
+                break;
+            case "SEDepthScale100":
+                seDepthScale = Math.max(0.0, value / 100.0);
                 break;
             default:
                 break;

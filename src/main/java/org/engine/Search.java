@@ -82,6 +82,10 @@ public final class Search {
 	private final int iirMinPVDepth;
 	private final int iirMinCutDepth;
 
+	private final int seMinDepth;
+	private final int seMargin;
+	private final double seDepthScale;
+
 	private final double lmrBase;
 	private final double lmrDivisor;
 	private final int reverseFutilityMaxDepth;
@@ -113,6 +117,9 @@ public final class Search {
 		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
+		this.seMinDepth = Math.max(0, spsa.seMinDepth);
+		this.seMargin = Math.max(0, spsa.seMargin);
+		this.seDepthScale = Math.max(0.0, spsa.seDepthScale);
 		buildLmrTable();
 	}
 
@@ -324,10 +331,36 @@ public final class Search {
 			}
 		}
 
-		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
+		int singularExtension = 0;
+
+		// Singular Extensions
+		if (!inCheck && depth >= seMinDepth && !MoveFactory.isNone(ttMoveForNode) && se.excludedMove == MoveFactory.MOVE_NONE 
+			&& nodeType != NodeType.rootNode && tableDepth >= depth - 3 && Math.abs(tableScore) < MATE_VALUE - MAX_PLY) {
+			
+			boolean canUseSE = (tableBound & TranspositionTable.BOUND_LOWER) != 0;
+			
+			if (canUseSE) {
+				int rDepth = (int) Math.floor((depth - 1) * seDepthScale);
+				int seDepth = Math.max(1, depth - 1 - rDepth);
+				int sBeta = tableScore - seMargin * depth / 8;
+				
+				se.excludedMove = ttMoveForNode;
+				int seScore = negamax(board, seDepth, ply, sBeta - 1, sBeta, NodeType.nonPVNode);
+				se.excludedMove = MoveFactory.MOVE_NONE;
+				
+				if (seScore < sBeta) {
+					singularExtension = 1;
+				} else if (sBeta >= beta) {
+					// Multi-cut: if another move is also >= beta, return beta
+					return sBeta;
+				}
+			}
+		}
+
+		int[] moves = moveBuffers[ply];
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true, se.excludedMove);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -338,6 +371,11 @@ public final class Search {
 			if (stopCheck()) break;
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
+			int extension = 0;
+
+			if (move == ttMoveForNode && singularExtension > 0) {
+				extension = singularExtension;
+			}
 
 			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
@@ -371,7 +409,7 @@ public final class Search {
 				}
 			}
 
-			int searchDepthChild = depth - 1;
+			int searchDepthChild = depth - 1 + extension;
 			int appliedReduction = 0;
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
@@ -388,7 +426,7 @@ public final class Search {
 				if (hVal < -4096) r += 1;
 				if (r > 0) {
 					appliedReduction = Math.min(r, depth - 1);
-					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
+					searchDepthChild = Math.max(1, depth - 1 + extension - appliedReduction);
 					se.reduction = appliedReduction;
 				}
 			}
@@ -405,11 +443,11 @@ public final class Search {
 				score = -negamax(board, searchDepthChild, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 
 				if (appliedReduction > 0 && score > alpha) {
-					score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+					score = -negamax(board, depth - 1 + extension, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 				}
 				
 				if (parentIsPV && score > alpha && score < beta) {
-					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
+					score = -negamax(board, depth - 1 + extension, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
 			}
 
