@@ -22,6 +22,7 @@ SEMinDepth, int, 8.0, 4.0, 16.0, 1.0, 0.005
 SEMarginPerDepth, int, 3.0, 1.0, 8.0, 0.5, 0.005
 SEDoubleMargin, int, 24.0, 8.0, 64.0, 4.0, 0.005
 SETripleMargin, int, 80.0, 32.0, 128.0, 8.0, 0.005
+SEPlyLimit, int, 2.0, 0.0, 4.0, 0.5, 0.005
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -54,6 +55,7 @@ public final class SPSA {
     public int seMarginPerDepth = 3;
     public int seDoubleMargin = 24;
     public int seTripleMargin = 80;
+    public int sePlyLimit = 2;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -121,6 +123,9 @@ public final class SPSA {
                 break;
             case "SETripleMargin":
                 seTripleMargin = Math.max(1, value);
+                break;
+            case "SEPlyLimit":
+                sePlyLimit = Math.max(0, value);
                 break;
             default:
                 break;
