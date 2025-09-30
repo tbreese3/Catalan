@@ -9,19 +9,21 @@ final class MovePicker {
 	private final int[] history;
 	private final int ttMove;
 	private final int killerMove;
+	private final int counterMove;
 	private final boolean includeQuiets;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+	    private enum Stage { TT, KILLER, COUNTER, CAPTURES, QUIETS, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
 	private boolean killerTried;
+	private boolean counterTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, int counterMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
@@ -29,13 +31,15 @@ final class MovePicker {
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
-        this.killerMove = MoveFactory.intToMove(killerMove);
+	        this.killerMove = MoveFactory.intToMove(killerMove);
+	        this.counterMove = MoveFactory.intToMove(counterMove);
 		this.includeQuiets = includeQuiets;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
 		this.ttTried = false;
 		this.killerTried = false;
+		this.counterTried = false;
 	}
 
 	private int scoreCaptureMVVLVA(int mv) {
@@ -116,7 +120,7 @@ final class MovePicker {
         for (;;) {
             switch (stage) {
                 case TT: {
-                    stage = Stage.KILLER;
+	                    stage = Stage.KILLER;
                     if (!ttTried && !MoveFactory.isNone(ttMove)) {
 						ttTried = true;
 						if (pos.isPseudoLegalMove(board, ttMove, gen)) return ttMove;
@@ -124,11 +128,20 @@ final class MovePicker {
 					break;
 				}
                 case KILLER: {
-                    stage = Stage.CAPTURES;
+	                    stage = Stage.COUNTER;
 					if (!includeQuiets) break;
                     if (!killerTried && !MoveFactory.isNone(killerMove) && killerMove != ttMove) {
 						killerTried = true;
                         if (pos.isPseudoLegalMove(board, killerMove, gen)) return killerMove;
+					}
+					break;
+				}
+	                case COUNTER: {
+	                    stage = Stage.CAPTURES;
+					if (!includeQuiets) break;
+					if (!counterTried && !MoveFactory.isNone(counterMove) && counterMove != ttMove && counterMove != killerMove) {
+						counterTried = true;
+						if (pos.isPseudoLegalMove(board, counterMove, gen)) return counterMove;
 					}
 					break;
 				}
@@ -141,11 +154,11 @@ final class MovePicker {
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+						if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
 					count = 0;
-                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
+	                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
 					break;
 				}
                 case QUIETS: {
@@ -157,10 +170,10 @@ final class MovePicker {
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+						if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
-                    stage = Stage.DONE;
+	                    stage = Stage.DONE;
 					break;
 				}
                 default:
