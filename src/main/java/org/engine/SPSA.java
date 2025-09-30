@@ -9,6 +9,8 @@ LMRBase100, int, 77.0, 0.0, 300.0, 5.0, 0.003
 LMRDivisor100, int, 216.0, 1.0, 1000.0, 10.0, 0.003
 ReverseFUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 ReverseFUTMarginPerDepth, int, 111.0, 0.0, 1024.0, 16.0, 0.003
+FUTMaxDepth, int, 2.0, 0.0, 8.0, 0.3, 0.00333333
+FUTMarginPerDepth, int, 110.0, 0.0, 1024.0, 16.0, 0.003
 QSeeMargin, int, -7.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
