@@ -338,22 +338,22 @@ public final class Search {
 		if (!inCheck && depth >= seMinDepth && !MoveFactory.isNone(ttMoveForNode) && se.excludedMove == MoveFactory.MOVE_NONE 
 			&& nodeType != NodeType.rootNode && tableDepth >= depth - 3 && Math.abs(tableScore) < MATE_VALUE - MAX_PLY) {
 			
-			boolean canUseSE = (tableBound & TranspositionTable.BOUND_LOWER) != 0;
+			boolean canUseSE = (tableBound & TranspositionTable.BOUND_LOWER) != 0 || tableBound == TranspositionTable.BOUND_EXACT;
 			
 			if (canUseSE) {
 				int rDepth = (int) Math.floor((depth - 1) * seDepthScale);
 				int seDepth = Math.max(1, depth - 1 - rDepth);
-				int sBeta = tableScore - seMargin * depth / 8;
-				
+				int sBeta = tableScore - seMargin;
+	
 				se.excludedMove = ttMoveForNode;
 				int seScore = negamax(board, seDepth, ply, sBeta - 1, sBeta, NodeType.nonPVNode);
 				se.excludedMove = MoveFactory.MOVE_NONE;
 				
 				if (seScore < sBeta) {
 					singularExtension = 1;
-				} else if (sBeta >= beta) {
-					// Multi-cut: if another move is also >= beta, return beta
-					return sBeta;
+				}
+				else if (seScore >= beta) {
+					return seScore;
 				}
 			}
 		}
