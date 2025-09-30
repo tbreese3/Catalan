@@ -1,6 +1,7 @@
 package org.engine;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class Search {
@@ -66,9 +67,13 @@ public final class Search {
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
-	private static final int HISTORY_SIZE = 2 * 64 * 64;
-	private static final int HISTORY_DECAY_SHIFT = 8;
-	private final int[] history = new int[HISTORY_SIZE];
+	// Butterfly history: history[sideToMove][from][to]
+	private static final int MAX_HISTORY = 16384;
+	private final int[][][] history = new int[2][64][64];
+
+	// Track previously searched quiet moves for maluses on quiet fail-high
+	private final int[][] quietsSearchedBuffers = new int[MAX_PLY + 5][MAX_MOVES];
+	private final int[] quietsSearchedCounts = new int[MAX_PLY + 5];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -330,6 +335,8 @@ public final class Search {
 		int bestScore = -INFTY;
 		int i = 0;
 		int quietsTried = 0;
+		quietsSearchedCounts[ply] = 0;
+		int[] quietsSearched = quietsSearchedBuffers[ply];
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
@@ -407,11 +414,17 @@ public final class Search {
 				if (isQuiet) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
-
 					boolean white = PositionFactory.whiteToMove(board);
-					onQuietFailHigh(white, move, Math.max(1, depth));
+					onQuietCutoff(white, move, Math.max(1, depth), quietsSearched, quietsSearchedCounts[ply]);
 				}
 				break;
+			}
+
+			// This quiet was searched and did not cutoff; remember it for maluses if a later quiet fails high
+			if (isQuiet) {
+				if (quietsSearchedCounts[ply] < MAX_MOVES) {
+					quietsSearched[quietsSearchedCounts[ply]++] = move;
+				}
 			}
 		}
 
@@ -580,28 +593,41 @@ public final class Search {
 		return pv;
 	}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
-
 	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
+		for (int s = 0; s < 2; s++) {
+			for (int f = 0; f < 64; f++) {
+				Arrays.fill(history[s][f], 0);
+			}
+		}
 	}
 
 	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return history[side][from][to];
 	}
 
-	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
-		int bonus = depth * depth;
-		int current = history[idx];
-		current -= (current >> HISTORY_DECAY_SHIFT);
-		current += bonus;
-		history[idx] = current;
+	private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
+
+	private void updateHistory(boolean white, int move, int bonus) {
+		int side = white ? 0 : 1;
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int clampedBonus = clamp(bonus, -MAX_HISTORY, MAX_HISTORY);
+		int current = history[side][from][to];
+		int updated = current + clampedBonus - (current * Math.abs(clampedBonus) / MAX_HISTORY);
+		history[side][from][to] = updated;
+	}
+
+	private void onQuietCutoff(boolean white, int bestMove, int depth, int[] quietsSearched, int count) {
+		int bonus = 300 * depth - 250;
+		updateHistory(white, bestMove, bonus);
+		for (int i = 0; i < count; i++) {
+			int m = quietsSearched[i];
+			if (m == bestMove) continue;
+			updateHistory(white, m, -bonus);
+		}
 	}
 }
 
