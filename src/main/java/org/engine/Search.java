@@ -241,6 +241,12 @@ public final class Search {
 
 		if (pos.isDraw(board)) return 0;
 
+		if (ply > 0) {
+			alpha = Math.max(alpha, -MATE_VALUE + ply);
+			beta  = Math.min(beta,  MATE_VALUE - (ply + 1));
+			if (alpha >= beta) return alpha;
+		}
+
         TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
 		TranspositionTable.Entry entry = pr.entry;
         boolean tableHit = pr.hit;

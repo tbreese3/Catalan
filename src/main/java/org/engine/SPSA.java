@@ -42,10 +42,6 @@ public final class SPSA {
     public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
-
-    // Singular extensions (tunable)
-    // singularMinDepth: minimum depth to consider singular verification (plies)
-    // singularMarginPerDepth: margin factor used as (margin * depth)
     public int singularMinDepth = 7;
     public int singularMarginPerDepth = 2;
 
