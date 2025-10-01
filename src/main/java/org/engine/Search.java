@@ -571,10 +571,6 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-		alpha = Math.max(alpha, -MATE_VALUE + ply);
-		beta  = Math.min(beta,  MATE_VALUE - (ply + 1));
-		if (alpha >= beta) return alpha;
-
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
         MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
