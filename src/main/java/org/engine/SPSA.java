@@ -43,6 +43,12 @@ public final class SPSA {
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
 
+    // Singular extensions (tunable)
+    // singularMinDepth: minimum depth to consider singular verification (plies)
+    // singularMarginPerDepth: margin factor used as (margin * depth)
+    public int singularMinDepth = 7;
+    public int singularMarginPerDepth = 2;
+
     public void setByName(String name, int value) {
         if (name == null) return;
         String key = name.trim();
@@ -97,6 +103,12 @@ public final class SPSA {
                 break;
             case "IIRMinCutDepth":
                 iirMinCutDepth = Math.max(0, value);
+                break;
+            case "SingularMinDepth":
+                singularMinDepth = Math.max(0, value);
+                break;
+            case "SingularMarginPerDepth":
+                singularMarginPerDepth = Math.max(0, value);
                 break;
             default:
                 break;
