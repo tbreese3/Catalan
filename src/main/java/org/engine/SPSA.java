@@ -18,10 +18,17 @@ LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
 LMPMarginPerDepth, int, 129.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 3.0, 0.0, 16.0, 1.0, 0.005
+SingularMinDepth, int, 7.0, 0.0, 32.0, 1.0, 0.005
+SingularMarginPerDepth, int, 2.0, 0.0, 8.0, 1.0, 0.005
+TMHeuristicsMinDepth, int, 6.0, 0.0, 32.0, 1.0, 0.005
+TMMaxExtensionFactor100, int, 350.0, 100.0, 1000.0, 10.0, 0.003
+TMInstabilityScoreWeight10000, int, 70.0, 0.0, 1000.0, 5.0, 0.003
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
 - LMRDivisor100 -> lmrDivisor = value / 100.0
+- TMMaxExtensionFactor100 -> tmMaxExtensionFactor = value / 100.0
+- TMInstabilityScoreWeight10000 -> tmInstabilityScoreWeight = value / 10000.0
 */
 
 public final class SPSA {    
@@ -42,12 +49,11 @@ public final class SPSA {
     public int lmpPerDepth = 1;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
-
-    // Singular extensions (tunable)
-    // singularMinDepth: minimum depth to consider singular verification (plies)
-    // singularMarginPerDepth: margin factor used as (margin * depth)
     public int singularMinDepth = 7;
     public int singularMarginPerDepth = 2;
+    public int tmHeuristicsMinDepth = 6;
+    public double tmMaxExtensionFactor = 3.5;
+    public double tmInstabilityScoreWeight = 0.007;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -109,6 +115,15 @@ public final class SPSA {
                 break;
             case "SingularMarginPerDepth":
                 singularMarginPerDepth = Math.max(0, value);
+                break;
+            case "TMHeuristicsMinDepth":
+                tmHeuristicsMinDepth = Math.max(0, value);
+                break;
+            case "TMMaxExtensionFactor100":
+                tmMaxExtensionFactor = Math.max(0.0, value / 100.0);
+                break;
+            case "TMInstabilityScoreWeight10000":
+                tmInstabilityScoreWeight = Math.max(0.0, value / 10000.0);
                 break;
             default:
                 break;

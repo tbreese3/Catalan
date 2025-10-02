@@ -54,6 +54,9 @@ public class UCI {
                     System.out.println("option name IIRMinCutDepth type spin default " + spsa.iirMinCutDepth + " min 0 max 16");
                     System.out.println("option name SingularMinDepth type spin default " + spsa.singularMinDepth + " min 0 max 32");
                     System.out.println("option name SingularMarginPerDepth type spin default " + spsa.singularMarginPerDepth + " min 0 max 8");
+                    System.out.println("option name TMHeuristicsMinDepth type spin default " + spsa.tmHeuristicsMinDepth + " min 0 max 32");
+                    System.out.println("option name TMMaxExtensionFactor100 type spin default " + (int)Math.round(spsa.tmMaxExtensionFactor * 100) + " min 100 max 1000");
+                    System.out.println("option name TMInstabilityScoreWeight10000 type spin default " + (int)Math.round(spsa.tmInstabilityScoreWeight * 10000) + " min 0 max 1000");
                 }
                 System.out.println("uciok");
             } else if (line.equals("isready")) {
@@ -204,6 +207,8 @@ public class UCI {
         // Support: go depth N | wtime T btime T winc I binc I movestogo M | movetime X
         int depth = -1;
         int wtime = -1, btime = -1, winc = 0, binc = 0, movestogo = 0, movetime = 0;
+        boolean ponder = false;
+        boolean infinite = false;
         StringTokenizer st = new StringTokenizer(cmd);
         st.nextToken(); // go
         while (st.hasMoreTokens()) {
@@ -223,13 +228,17 @@ public class UCI {
                     movestogo = Integer.parseInt(st.nextToken());
                 } else if ("movetime".equals(t) && st.hasMoreTokens()) {
                     movetime = Integer.parseInt(st.nextToken());
+                } else if ("ponder".equals(t)) {
+                    ponder = true;
+                } else if ("infinite".equals(t)) {
+                    infinite = true;
                 }
             } catch (Exception ignored) {}
         }
 
         stopSearch();
 
-        final boolean hasTiming = movetime > 0 || wtime >= 0 || btime >= 0;
+        final boolean hasTiming = movetime > 0 || wtime >= 0 || btime >= 0 || ponder || infinite;
         if (!hasTiming && depth <= 0) depth = 3; // default fixed depth when no timing is given
 
         final int fDepth = depth;
@@ -244,8 +253,12 @@ public class UCI {
             Search.Limits limits = new Search.Limits();
             if (hasTiming) {
                 boolean whiteToMove = (board[12] & 1L) == 0L;
-                TimeManager.TimeAllocation alloc = timeManager.allocate(
-                        whiteToMove, fwtime, fbtime, fwinc, fbinc, fmovestogo, fmovetime);
+                TimeManager.TimeAllocation alloc;
+                if (infinite || ponder) {
+                    alloc = new TimeManager.TimeAllocation(Long.MAX_VALUE, Long.MAX_VALUE);
+                } else {
+                    alloc = timeManager.allocate(whiteToMove, fwtime, fbtime, fwinc, fbinc, fmovestogo, fmovetime);
+                }
                 limits.softMs = alloc.soft();
                 limits.hardMs = alloc.maximum();
             } else {

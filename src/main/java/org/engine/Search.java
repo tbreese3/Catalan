@@ -95,7 +95,14 @@ public final class Search {
 	private final int nmpEvalMargin;
 	private final int nmpEvalMax;
     private final int singularMinDepth;
-    private final int singularMarginPerDepth;
+	private final int singularMarginPerDepth;
+
+	private final int tmHeuristicsMinDepth;
+	private final double tmMaxExtensionFactor;
+	private final double tmInstabilityScoreWeight;
+	private final List<Integer> iterationScores = new ArrayList<>();
+	private int completedDepth = 0;
+	private int lastScore = 0;
 
 	public Search(SPSA spsa) {
 		if (spsa == null) spsa = new SPSA();
@@ -116,9 +123,11 @@ public final class Search {
 		this.lmpMarginPerDepth = Math.max(0, spsa.lmpMarginPerDepth);
 		this.iirMinPVDepth = Math.max(0, spsa.iirMinPVDepth);
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
-		// Singular tunables
         this.singularMinDepth = Math.max(0, spsa.singularMinDepth);
         this.singularMarginPerDepth = Math.max(0, spsa.singularMarginPerDepth);
+		this.tmHeuristicsMinDepth = Math.max(0, spsa.tmHeuristicsMinDepth);
+		this.tmMaxExtensionFactor = Math.max(1.0, spsa.tmMaxExtensionFactor);
+		this.tmInstabilityScoreWeight = Math.max(0.0, spsa.tmInstabilityScoreWeight);
 		buildLmrTable();
 	}
 
@@ -145,6 +154,9 @@ public final class Search {
 		selDepth = 0;
 		softStopTimeMs = limits.softMs > 0 ? startTimeMs + limits.softMs : Long.MAX_VALUE;
 		hardStopTimeMs = limits.hardMs > 0 ? startTimeMs + limits.hardMs : Long.MAX_VALUE;
+		iterationScores.clear();
+		completedDepth = 0;
+		lastScore = 0;
 
 		Eval.refreshAccumulator(nnueState, root);
 
@@ -226,10 +238,43 @@ public final class Search {
 				infoHandler.onInfo(depth, selDepth, nodes, nps, hashfull, score, elapsed, pv);
 			}
 
-			if (now >= softStopTimeMs) break;
+			iterationScores.add(previousScore);
+			completedDepth = depth;
+			lastScore = previousScore;
+			if (softTimeUp(startTimeMs, limits.softMs)) break;
 		}
 
 		return result;
+	}
+
+	private boolean softTimeUp(long searchStartMs, long softTimeLimit) {
+		if (softTimeLimit >= Long.MAX_VALUE / 2) {
+			return false;
+		}
+
+		long now = System.currentTimeMillis();
+		long currentElapsed = now - searchStartMs;
+
+		if (now >= hardStopTimeMs) {
+			return true;
+		}
+
+		if (completedDepth < tmHeuristicsMinDepth) {
+			return currentElapsed >= softTimeLimit;
+		}
+
+		double instability = 0.0;
+		if (iterationScores.size() >= 2) {
+			int prevScore = iterationScores.get(iterationScores.size() - 2);
+			int scoreDifference = Math.abs(lastScore - prevScore);
+			instability += scoreDifference * tmInstabilityScoreWeight;
+		}
+
+		double extensionFactor = 1.0 + instability;
+		extensionFactor = Math.min(extensionFactor, tmMaxExtensionFactor);
+
+		long extendedSoftTime = (long) (softTimeLimit * extensionFactor);
+		return currentElapsed >= extendedSoftTime;
 	}
 
 	private int negamax(long[] board, int depth, int ply, int alpha, int beta, NodeType nodeType) {
