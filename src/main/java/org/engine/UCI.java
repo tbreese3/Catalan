@@ -248,13 +248,15 @@ public class UCI {
         final int fbinc = Math.max(0, binc);
         final int fmovestogo = Math.max(0, movestogo);
         final int fmovetime = Math.max(0, movetime);
+        final boolean fPonder = ponder;
+        final boolean fInfinite = infinite;
 
         searchThread = new Thread(() -> {
             Search.Limits limits = new Search.Limits();
             if (hasTiming) {
                 boolean whiteToMove = (board[12] & 1L) == 0L;
                 TimeManager.TimeAllocation alloc;
-                if (infinite || ponder) {
+                if (fInfinite || fPonder) {
                     alloc = new TimeManager.TimeAllocation(Long.MAX_VALUE, Long.MAX_VALUE);
                 } else {
                     alloc = timeManager.allocate(whiteToMove, fwtime, fbtime, fwinc, fbinc, fmovestogo, fmovetime);
