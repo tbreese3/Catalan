@@ -340,7 +340,7 @@ public final class Search {
 		int prevMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
 		boolean whiteSTM = PositionFactory.whiteToMove(board);
 		int cm = MoveFactory.MOVE_NONE;
-		if (!MoveFactory.isNone(prevMove)) cm = getCounterMove(!whiteSTM, prevMove);
+		if (!MoveFactory.isNone(prevMove)) cm = getCounterMove(whiteSTM, prevMove);
 		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, cm, killer, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
@@ -482,7 +482,7 @@ public final class Search {
 			}
 
 			if (alpha >= beta) {
-				if (isQuiet) {
+				if (isQuiet && score >= beta) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
 
@@ -491,7 +491,7 @@ public final class Search {
 
 					int parentMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
 					if (!MoveFactory.isNone(parentMove)) {
-						setCounterMove(!white, parentMove, move);
+						setCounterMove(white, parentMove, move);
 					}
 				}
 				break;
@@ -581,13 +581,9 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-        int[] moves = moveBuffers[ply];
-        int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        int prevMoveQ = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
-        boolean whiteSTMq = PositionFactory.whiteToMove(board);
-        int cmQ = MoveFactory.MOVE_NONE;
-        if (!MoveFactory.isNone(prevMoveQ)) cmQ = getCounterMove(!whiteSTMq, prevMoveQ);
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, cmQ, MoveFactory.MOVE_NONE, inCheck);
+		int[] moves = moveBuffers[ply];
+		int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
