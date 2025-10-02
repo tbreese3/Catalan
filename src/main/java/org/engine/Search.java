@@ -12,7 +12,6 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
-    // Replaced by tunables in SPSA
 
 	public static final class Limits {
 		public int depth = -1;
@@ -37,7 +36,7 @@ public final class Search {
 		int searchKiller;
 		int staticEval;
 		int reduction;
-
+		
 		StackEntry() {
 			this.pv = new int[MAX_PLY];
 			this.pvLength = 0;
@@ -72,10 +71,9 @@ public final class Search {
 	private static final int MAX_HISTORY = 16384;
 	private final int[] history = new int[HISTORY_SIZE];
 	
-	private static final int CONT_HISTORY_PLIES = 6;
 	private static final int PIECE_NB = 12;
-	private final int[][][][][] continuationHistory = new int[CONT_HISTORY_PLIES][PIECE_NB][64][PIECE_NB][64];
-	private final int[] prevMovesBuffer = new int[CONT_HISTORY_PLIES];
+	private final int[][][][] continuationHistory = new int[PIECE_NB][64][PIECE_NB][64];
+	private static final int MAX_CONT_HIST_PLIES = 6;
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -386,8 +384,14 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		int prevMovesCount = collectPreviousMoves(ply);
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, continuationHistory, prevMovesBuffer, prevMovesCount, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		
+		boolean white = PositionFactory.whiteToMove(board);
+		int[][] contHist1 = ply >= 1 ? getContHistEntry(board, stack[ply-1].move, !white) : null;
+		int[][] contHist2 = ply >= 2 ? getContHistEntry(board, stack[ply-2].move, white) : null;
+		int[][] contHist3 = ply >= 3 ? getContHistEntry(board, stack[ply-3].move, !white) : null;
+		int[][] contHist4 = ply >= 4 ? getContHistEntry(board, stack[ply-4].move, white) : null;
+		
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHist1, contHist2, contHist3, contHist4, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -630,8 +634,14 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        int prevMovesCount = collectPreviousMoves(ply);
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, continuationHistory, prevMovesBuffer, prevMovesCount, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        
+        boolean white = PositionFactory.whiteToMove(board);
+        int[][] contHist1 = ply >= 1 ? getContHistEntry(board, stack[ply-1].move, !white) : null;
+        int[][] contHist2 = ply >= 2 ? getContHistEntry(board, stack[ply-2].move, white) : null;
+        int[][] contHist3 = ply >= 3 ? getContHistEntry(board, stack[ply-3].move, !white) : null;
+        int[][] contHist4 = ply >= 4 ? getContHistEntry(board, stack[ply-4].move, white) : null;
+        
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, contHist1, contHist2, contHist3, contHist4, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -724,31 +734,23 @@ public final class Search {
 
 	private void clearHistory() {
 		for (int i = 0; i < history.length; i++) history[i] = 0;
-
-		for (int ply = 0; ply < CONT_HISTORY_PLIES; ply++) {
-			for (int p1 = 0; p1 < PIECE_NB; p1++) {
-				for (int s1 = 0; s1 < 64; s1++) {
-					for (int p2 = 0; p2 < PIECE_NB; p2++) {
-						for (int s2 = 0; s2 < 64; s2++) {
-							continuationHistory[ply][p1][s1][p2][s2] = 0;
-						}
+		
+		for (int p1 = 0; p1 < PIECE_NB; p1++) {
+			for (int s1 = 0; s1 < 64; s1++) {
+				for (int p2 = 0; p2 < PIECE_NB; p2++) {
+					for (int s2 = 0; s2 < 64; s2++) {
+						continuationHistory[p1][s1][p2][s2] = 0;
 					}
 				}
 			}
 		}
 	}
 	
-	private int collectPreviousMoves(int ply) {
-		int count = 0;
-		for (int i = 0; i < CONT_HISTORY_PLIES && ply - i - 1 >= 0; i++) {
-			int move = stack[ply - i - 1].move;
-			if (!MoveFactory.isNone(move)) {
-				prevMovesBuffer[count++] = move;
-			} else {
-				break;
-			}
-		}
-		return count;
+	private int[][] getContHistEntry(long[] board, int move, boolean white) {
+		if (MoveFactory.isNone(move)) return null;
+		int to = MoveFactory.GetTo(move);
+		int piece = pieceIndex(board, to, white);
+		return continuationHistory[piece][to];
 	}
 
 	private int historyScore(boolean white, int move) {
@@ -774,14 +776,14 @@ public final class Search {
 		int to = MoveFactory.GetTo(move);
 		int piece = pieceIndex(board, from, white);
 		
-		for (int i = 0; i < CONT_HISTORY_PLIES && ply - i - 1 >= 0; i++) {
-			int prevMove = stack[ply - i - 1].move;
+		for (int i = 1; i <= MAX_CONT_HIST_PLIES && ply - i >= 0; i++) {
+			int prevMove = stack[ply - i].move;
 			if (!MoveFactory.isNone(prevMove)) {
 				int prevTo = MoveFactory.GetTo(prevMove);
-				boolean prevWhite = ((i + 1) % 2 == 0) ? white : !white;
+				boolean prevWhite = (i % 2 == 1) ? !white : white;
 				int prevPiece = pieceIndex(board, prevTo, prevWhite);
 				
-				updateHistory(continuationHistory[i][prevPiece][prevTo][piece], to, bonus);
+				updateHistory(continuationHistory[prevPiece][prevTo][piece], to, bonus);
 			}
 		}
 	}
