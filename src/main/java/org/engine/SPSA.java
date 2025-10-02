@@ -2,27 +2,27 @@ package org.engine;
 
 /*
 NMPBase, int, 2.0, 0.0, 10.0, 0.5, 0.005
-NMPDepthScale100, int, 23.0, 0.0, 200.0, 2.0, 0.005
-NMPEvalMargin, int, 241.0, 1.0, 4000.0, 50.0, 0.003
+NMPDepthScale100, int, 24.0, 0.0, 200.0, 2.0, 0.005
+NMPEvalMargin, int, 217.0, 1.0, 4000.0, 50.0, 0.003
 NMPEvalMax, int, 4.0, 0.0, 10.0, 0.5, 0.005
-LMRBase100, int, 77.0, 0.0, 300.0, 5.0, 0.003
-LMRDivisor100, int, 216.0, 1.0, 1000.0, 10.0, 0.003
+LMRBase100, int, 74.0, 0.0, 300.0, 5.0, 0.003
+LMRDivisor100, int, 220.0, 1.0, 1000.0, 10.0, 0.003
 ReverseFUTMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
-ReverseFUTMarginPerDepth, int, 111.0, 0.0, 1024.0, 16.0, 0.003
+ReverseFUTMarginPerDepth, int, 116.0, 0.0, 1024.0, 16.0, 0.003
 FUTMaxDepth, int, 2.0, 0.0, 8.0, 0.3, 0.00333333
-FUTMarginPerDepth, int, 110.0, 0.0, 1024.0, 16.0, 0.003
-QSeeMargin, int, -7.0, -1024.0, 1024.0, 8.0, 0.003
+FUTMarginPerDepth, int, 119.0, 0.0, 1024.0, 16.0, 0.003
+QSeeMargin, int, -3.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
-LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
+LMPPerDepth, int, 0.0, 0.0, 16.0, 1.0, 0.00333333
 LMPMarginPerDepth, int, 129.0, 0.0, 1024.0, 16.0, 0.003
 IIRMinPVDepth, int, 2.0, 0.0, 16.0, 1.0, 0.005
 IIRMinCutDepth, int, 3.0, 0.0, 16.0, 1.0, 0.005
 SingularMinDepth, int, 7.0, 0.0, 32.0, 1.0, 0.005
-SingularMarginPerDepth, int, 2.0, 0.0, 8.0, 1.0, 0.005
-TMHeuristicsMinDepth, int, 6.0, 0.0, 32.0, 1.0, 0.005
-TMMaxExtensionFactor100, int, 350.0, 100.0, 1000.0, 10.0, 0.003
-TMInstabilityScoreWeight10000, int, 70.0, 0.0, 1000.0, 5.0, 0.003
+SingularMarginPerDepth, int, 1.0, 0.0, 8.0, 1.0, 0.005
+TMHeuristicsMinDepth, int, 5.0, 0.0, 32.0, 1.0, 0.005
+TMMaxExtensionFactor100, int, 345.0, 100.0, 1000.0, 10.0, 0.003
+TMInstabilityScoreWeight10000, int, 69.0, 0.0, 1000.0, 5.0, 0.003
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -32,28 +32,28 @@ Notes:
 */
 
 public final class SPSA {    
-    public double lmrBase = 0.77;
-    public double lmrDivisor = 2.16;
+    public double lmrBase = 0.74;
+    public double lmrDivisor = 2.20;
     public int reverseFutilityMaxDepth = 3;
-    public int reverseFutilityMarginPerDepth = 111;
+    public int reverseFutilityMarginPerDepth = 116;
     public int futilityMaxDepth = 2;
-    public int futilityMarginPerDepth = 110;
+    public int futilityMarginPerDepth = 119;
     public int lmpMarginPerDepth = 129;
-    public int qseeMargin = -7;
+    public int qseeMargin = -3;
     public int nmpBase = 2;
-    public double nmpDepthScale = 0.23;
-    public int nmpEvalMargin = 241;
+    public double nmpDepthScale = 0.24;
+    public int nmpEvalMargin = 217;
     public int nmpEvalMax = 4;
     public int lmpMaxDepth = 3;
     public int lmpBaseThreshold = 4;
-    public int lmpPerDepth = 1;
+    public int lmpPerDepth = 0;
     public int iirMinPVDepth = 2;
     public int iirMinCutDepth = 3;
     public int singularMinDepth = 7;
-    public int singularMarginPerDepth = 2;
-    public int tmHeuristicsMinDepth = 6;
-    public double tmMaxExtensionFactor = 3.5;
-    public double tmInstabilityScoreWeight = 0.007;
+    public int singularMarginPerDepth = 1;
+    public int tmHeuristicsMinDepth = 5;
+    public double tmMaxExtensionFactor = 3.45;
+    public double tmInstabilityScoreWeight = 0.0069;
 
     public void setByName(String name, int value) {
         if (name == null) return;
