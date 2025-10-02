@@ -2,6 +2,7 @@ package org.engine;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
 
 public final class Search {
 
@@ -67,9 +68,9 @@ public final class Search {
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
-	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_DECAY_SHIFT = 8;
-	private final int[] history = new int[HISTORY_SIZE];
+	private final int[][][] history = new int[2][64][64];
+	private final int[][][][] contHistory = new int[2][64][64][64];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -380,7 +381,8 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		int prevMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, prevMove, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -474,7 +476,7 @@ public final class Search {
 				int r = lmrTable[dIdx][mIdx];
 
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
-				int hVal = historyScore(whiteSTM, move);
+				int hVal = historyScore(whiteSTM, prevMove, move);
 				if (hVal > 4096) r = Math.max(0, r - 2);
 				else if (hVal > 1024) r = Math.max(0, r - 1);
 
@@ -527,7 +529,7 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 
 					boolean white = PositionFactory.whiteToMove(board);
-					onQuietFailHigh(white, move, Math.max(1, depth));
+					onQuietFailHigh(white, prevMove, move, Math.max(1, depth));
 				}
 				break;
 			}
@@ -618,7 +620,8 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        int prevMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, prevMove, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -702,28 +705,56 @@ public final class Search {
 		return pv;
 	}
 
-	private static int historyIndex(boolean white, int move) {
+	private void clearHistory() {
+		for (int s = 0; s < 2; s++) {
+			for (int f = 0; f < 64; f++) {
+				Arrays.fill(history[s][f], 0);
+			}
+		}
+		for (int s = 0; s < 2; s++) {
+			for (int pt = 0; pt < 64; pt++) {
+				for (int f = 0; f < 64; f++) {
+					Arrays.fill(contHistory[s][pt][f], 0);
+				}
+			}
+		}
+	}
+
+	private int historyScore(boolean white, int prevMove, int move) {
+		int side = white ? 0 : 1;
 		int from = MoveFactory.GetFrom(move);
 		int to = MoveFactory.GetTo(move);
+		int base = history[side][from][to];
+		int cont = 0;
+		if (!MoveFactory.isNone(prevMove)) {
+			int prevTo = MoveFactory.GetTo(prevMove);
+			if (prevTo >= 0 && prevTo < 64) {
+				cont = contHistory[side][prevTo][from][to];
+			}
+		}
+		return base + cont;
+	}
+
+	private void onQuietFailHigh(boolean white, int prevMove, int move, int depth) {
 		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
-
-	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
-	}
-
-	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
-	}
-
-	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
 		int bonus = depth * depth;
-		int current = history[idx];
+
+		int current = history[side][from][to];
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
-		history[idx] = current;
+		history[side][from][to] = current;
+
+		if (!MoveFactory.isNone(prevMove)) {
+			int prevTo = MoveFactory.GetTo(prevMove);
+			if (prevTo >= 0 && prevTo < 64) {
+				int ccur = contHistory[side][prevTo][from][to];
+				ccur -= (ccur >> HISTORY_DECAY_SHIFT);
+				ccur += bonus;
+				contHistory[side][prevTo][from][to] = ccur;
+			}
+		}
 	}
 }
 
