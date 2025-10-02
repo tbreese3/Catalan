@@ -14,12 +14,19 @@ final class MovePicker {
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+	    private enum Stage { TT, KILLER, CAPTURES, QUIETS, BAD_CAPTURES, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
 	private boolean killerTried;
+
+		// Capture partitioning
+		private int capGoodCount;
+		private int badCount;
+		private int badIndex;
+		private final int[] badBuffer;
+		private final int[] badScores;
 
 	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
@@ -36,6 +43,11 @@ final class MovePicker {
 		this.count = 0;
 		this.ttTried = false;
 		this.killerTried = false;
+		this.capGoodCount = 0;
+		this.badCount = 0;
+		this.badIndex = 0;
+		this.badBuffer = new int[moveBuffer.length];
+		this.badScores = new int[scoreBuffer.length];
 	}
 
 	private int scoreCaptureMVVLVA(int mv) {
@@ -77,6 +89,33 @@ final class MovePicker {
 			scores[i] = scoreCaptureMVVLVA(buffer[i]);
 		}
 	}
+
+	private void partitionCapturesBySEE(int size) {
+			capGoodCount = 0;
+			badCount = 0;
+			badIndex = 0;
+			for (int i = 0; i < size; i++) {
+				int mv = buffer[i];
+				int sc = scores[i];
+				int flags = MoveFactory.GetFlags(mv);
+				boolean good;
+				if (flags == MoveFactory.FLAG_PROMOTION) {
+					good = true;
+				} else {
+					int see = SEE.see(board, mv);
+					good = see >= 0;
+				}
+				if (good) {
+					buffer[capGoodCount] = mv;
+					scores[capGoodCount] = sc;
+					capGoodCount++;
+				} else {
+					badBuffer[badCount] = mv;
+					badScores[badCount] = sc;
+					badCount++;
+				}
+			}
+		}
 
 	private static int historyIndex(boolean white, int move) {
 		int from = MoveFactory.GetFrom(move);
@@ -132,20 +171,21 @@ final class MovePicker {
 					}
 					break;
 				}
-                case CAPTURES: {
+				case CAPTURES: {
 					if (count == 0) {
 						index = 0;
 						count = gen.generateCaptures(board, buffer, 0);
 						scorecaptures(count);
+						partitionCapturesBySEE(count);
 					}
-					while (index < count) {
-						int m = getnextmove(buffer, scores, count, index++);
-                        m = MoveFactory.intToMove(m);
+					while (index < capGoodCount) {
+						int m = getnextmove(buffer, scores, capGoodCount, index++);
+						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
 					count = 0;
-                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
+					stage = includeQuiets ? Stage.QUIETS : Stage.BAD_CAPTURES;
 					break;
 				}
                 case QUIETS: {
@@ -160,7 +200,17 @@ final class MovePicker {
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
-                    stage = Stage.DONE;
+					stage = Stage.BAD_CAPTURES;
+					break;
+				}
+				case BAD_CAPTURES: {
+					while (badIndex < badCount) {
+						int m = getnextmove(badBuffer, badScores, badCount, badIndex++);
+						m = MoveFactory.intToMove(m);
+						if (m == ttMove || m == killerMove) continue;
+						return m;
+					}
+					stage = Stage.DONE;
 					break;
 				}
                 default:
