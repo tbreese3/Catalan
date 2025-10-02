@@ -119,8 +119,8 @@ final class MovePicker {
 	int next() {
         for (;;) {
             switch (stage) {
-	                case TT: {
-	                    stage = Stage.KILLER;
+	            case TT: {
+	                stage = Stage.KILLER;
                     if (!ttTried && !MoveFactory.isNone(ttMove)) {
 						ttTried = true;
 						if (pos.isPseudoLegalMove(board, ttMove, gen)) return ttMove;
@@ -128,7 +128,7 @@ final class MovePicker {
 					break;
 				}
                 case KILLER: {
-	                    stage = Stage.COUNTER;
+	                stage = Stage.COUNTER;
 					if (!includeQuiets) break;
                     if (!killerTried && !MoveFactory.isNone(killerMove) && killerMove != ttMove && killerMove != counterMove) {
 						killerTried = true;

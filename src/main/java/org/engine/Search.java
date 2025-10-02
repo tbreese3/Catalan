@@ -434,7 +434,6 @@ public final class Search {
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
 
-				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > 4096) r = Math.max(0, r - 2);
 				else if (hVal > 1024) r = Math.max(0, r - 1);
