@@ -6,22 +6,24 @@ final class MovePicker {
 	private final MoveGenerator gen;
 	private final int[] buffer;
 	private final int[] scores;
-	private final int[] history;
+	private final int[][][] history;
 	private final int ttMove;
 	private final int killerMove;
+	private final int counterMove;
 	private final boolean includeQuiets;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+    private enum Stage { TT, KILLER, COUNTER, CAPTURES, QUIETS, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
 	private boolean killerTried;
+	private boolean counterTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[][][] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, int counterMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
@@ -30,12 +32,14 @@ final class MovePicker {
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
+        this.counterMove = MoveFactory.intToMove(counterMove);
 		this.includeQuiets = includeQuiets;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
 		this.ttTried = false;
 		this.killerTried = false;
+		this.counterTried = false;
 	}
 
 	private int scoreCaptureMVVLVA(int mv) {
@@ -78,19 +82,14 @@ final class MovePicker {
 		}
 	}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
-
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
+		int side = white ? 0 : 1;
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
-			int idx = historyIndex(white, m);
-			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			int from = MoveFactory.GetFrom(m);
+			int to = MoveFactory.GetTo(m);
+			int score = (history != null) ? history[side][from][to] : 0;
 			scores[i] = score;
 		}
 	}
@@ -124,11 +123,20 @@ final class MovePicker {
 					break;
 				}
                 case KILLER: {
-                    stage = Stage.CAPTURES;
+                    stage = Stage.COUNTER;
 					if (!includeQuiets) break;
                     if (!killerTried && !MoveFactory.isNone(killerMove) && killerMove != ttMove) {
 						killerTried = true;
                         if (pos.isPseudoLegalMove(board, killerMove, gen)) return killerMove;
+					}
+					break;
+				}
+                case COUNTER: {
+                    stage = Stage.CAPTURES;
+					if (!includeQuiets) break;
+                    if (!counterTried && !MoveFactory.isNone(counterMove) && counterMove != ttMove && counterMove != killerMove) {
+						counterTried = true;
+                        if (pos.isPseudoLegalMove(board, counterMove, gen)) return counterMove;
 					}
 					break;
 				}
@@ -141,7 +149,7 @@ final class MovePicker {
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+						if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
 					count = 0;
@@ -157,7 +165,7 @@ final class MovePicker {
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
                         m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+						if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
                     stage = Stage.DONE;

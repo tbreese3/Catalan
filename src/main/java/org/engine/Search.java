@@ -67,9 +67,9 @@ public final class Search {
 	private final MoveGenerator moveGen = new MoveGenerator();
 	private final PositionFactory pos = new PositionFactory();
 
-	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_DECAY_SHIFT = 8;
-	private final int[] history = new int[HISTORY_SIZE];
+	private final int[][][] history = new int[2][64][64];
+	private final int[][][] counterMoves = new int[2][64][64];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -166,6 +166,7 @@ public final class Search {
 		stack = new StackEntry[MAX_PLY + 5];
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
+		clearCounterMoves();
 
 		Result result = new Result();
 
@@ -380,7 +381,8 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		int counter = getCounterMove(board, ply);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, counter, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -528,6 +530,10 @@ public final class Search {
 
 					boolean white = PositionFactory.whiteToMove(board);
 					onQuietFailHigh(white, move, Math.max(1, depth));
+					
+					if (ply > 0 && !MoveFactory.isNone(stack[ply - 1].move)) {
+						storeCounterMove(board, ply, move);
+					}
 				}
 				break;
 			}
@@ -618,7 +624,7 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -702,28 +708,69 @@ public final class Search {
 		return pv;
 	}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
+	private void clearHistory() {
+		for (int side = 0; side < 2; side++) {
+			for (int from = 0; from < 64; from++) {
+				for (int to = 0; to < 64; to++) {
+					history[side][from][to] = 0;
+				}
+			}
+		}
 	}
 
-	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
+	private void clearCounterMoves() {
+		for (int side = 0; side < 2; side++) {
+			for (int from = 0; from < 64; from++) {
+				for (int to = 0; to < 64; to++) {
+					counterMoves[side][from][to] = MoveFactory.MOVE_NONE;
+				}
+			}
+		}
 	}
 
 	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
+		return history[side][from][to];
 	}
 
 	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int side = white ? 0 : 1;
 		int bonus = depth * depth;
-		int current = history[idx];
+		int current = history[side][from][to];
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
-		history[idx] = current;
+		history[side][from][to] = current;
+	}
+
+	private int getCounterMove(long[] board, int ply) {
+		if (ply <= 0) return MoveFactory.MOVE_NONE;
+		int prevMove = stack[ply - 1].move;
+		if (MoveFactory.isNone(prevMove)) return MoveFactory.MOVE_NONE;
+		
+		// The counter move is stored for the side that made the previous move
+		// Since we're at ply now, the previous move was made by the opposite side
+		boolean currentSideWhite = PositionFactory.whiteToMove(board);
+		int side = currentSideWhite ? 1 : 0; // opposite side
+		int from = MoveFactory.GetFrom(prevMove);
+		int to = MoveFactory.GetTo(prevMove);
+		return counterMoves[side][from][to];
+	}
+
+	private void storeCounterMove(long[] board, int ply, int move) {
+		int prevMove = stack[ply - 1].move;
+		if (MoveFactory.isNone(prevMove)) return;
+		
+		// Store the counter move for the side that made the previous move
+		// At ply, we just moved, so at ply-1 the opposite side moved
+		boolean currentSideWhite = PositionFactory.whiteToMove(board);
+		int side = currentSideWhite ? 1 : 0; // opposite side made the previous move
+		int from = MoveFactory.GetFrom(prevMove);
+		int to = MoveFactory.GetTo(prevMove);
+		counterMoves[side][from][to] = move;
 	}
 }
 
