@@ -7,6 +7,9 @@ final class MovePicker {
 	private final int[] buffer;
 	private final int[] scores;
 	private final int[] history;
+	private final int[][][][][] continuationHistory;
+	private final int[] prevMoves;
+	private final int prevMovesCount;
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
@@ -21,11 +24,16 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[][][][][] continuationHistory,
+			   int[] prevMoves, int prevMovesCount, int[] moveBuffer, int[] scoreBuffer, 
+			   int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.history = history;
+		this.continuationHistory = continuationHistory;
+		this.prevMoves = prevMoves;
+		this.prevMovesCount = prevMovesCount;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
@@ -85,12 +93,37 @@ final class MovePicker {
 		return (side << 12) | (from << 6) | to;
 	}
 
+	private static int pieceIndex(long[] board, int from, boolean white) {
+		int piece = PositionFactory.pieceAt(board, from);
+		if (piece == -1) return white ? 0 : 6; // Pawn if empty square
+		return piece;
+	}
+
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			
+			if (continuationHistory != null && prevMoves != null) {
+				int from = MoveFactory.GetFrom(m);
+				int to = MoveFactory.GetTo(m);
+				int piece = pieceIndex(board, from, white);
+				
+				for (int ply = 0; ply < prevMovesCount && ply < continuationHistory.length; ply++) {
+					int prevMove = prevMoves[ply];
+					if (!MoveFactory.isNone(prevMove)) {
+						int prevFrom = MoveFactory.GetFrom(prevMove);
+						int prevTo = MoveFactory.GetTo(prevMove);
+						boolean prevWhite = (ply % 2 == 0) ? !white : white;
+						int prevPiece = pieceIndex(board, prevTo, prevWhite);
+						
+						score += continuationHistory[ply][prevPiece][prevTo][piece][to];
+					}
+				}
+			}
+			
 			scores[i] = score;
 		}
 	}
