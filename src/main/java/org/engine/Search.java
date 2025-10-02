@@ -620,8 +620,7 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        int prevMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, prevMove, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        MovePicker picker = new MovePicker(board, pos, moveGen, null, null, MoveFactory.MOVE_NONE, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
