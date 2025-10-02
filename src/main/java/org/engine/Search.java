@@ -28,7 +28,7 @@ public final class Search {
 
 	private enum NodeType { rootNode, pvNode, nonPVNode }
 
-	private static final class StackEntry {
+	static final class StackEntry {
 		int[] pv;
 		int pvLength;
 		boolean inCheck;
@@ -37,6 +37,8 @@ public final class Search {
 		int searchKiller;
 		int staticEval;
 		int reduction;
+		int movedPiece;
+		int[][] continuationHistory;
 
 		StackEntry() {
 			this.pv = new int[MAX_PLY];
@@ -47,6 +49,8 @@ public final class Search {
 			this.searchKiller = MoveFactory.MOVE_NONE;
 			this.staticEval = SCORE_NONE;
 			this.reduction = 0;
+			this.movedPiece = -1;
+			this.continuationHistory = null;
 		}
 	}
 
@@ -70,6 +74,13 @@ public final class Search {
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_DECAY_SHIFT = 8;
 	private final int[] history = new int[HISTORY_SIZE];
+
+	private static final int PIECE_TYPES = 12;
+	private static final int SQUARES = 64;
+	private final int[][][][] continuationHistory1 = new int[PIECE_TYPES][SQUARES][PIECE_TYPES][SQUARES];
+	private final int[][][][] continuationHistory2 = new int[PIECE_TYPES][SQUARES][PIECE_TYPES][SQUARES];
+	private final int[][][][] continuationHistory4 = new int[PIECE_TYPES][SQUARES][PIECE_TYPES][SQUARES];
+	private final int[][][][] continuationHistory6 = new int[PIECE_TYPES][SQUARES][PIECE_TYPES][SQUARES];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -377,10 +388,19 @@ public final class Search {
 			}
 		}
 
+		// Set up continuation history pointers for this ply
+		if (ply >= 1 && stack[ply - 1].movedPiece >= 0) {
+			int prevPiece = stack[ply - 1].movedPiece;
+			int prevTo = MoveFactory.GetTo(stack[ply - 1].move);
+			if (prevTo >= 0 && prevTo < SQUARES && prevPiece >= 0 && prevPiece < PIECE_TYPES) {
+				stack[ply].continuationHistory = continuationHistory1[prevPiece][prevTo];
+			}
+		}
+
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true, stack, ply);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -474,7 +494,7 @@ public final class Search {
 				int r = lmrTable[dIdx][mIdx];
 
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
-				int hVal = historyScore(whiteSTM, move);
+				int hVal = historyScore(whiteSTM, move, ply);
 				if (hVal > 4096) r = Math.max(0, r - 2);
 				else if (hVal > 1024) r = Math.max(0, r - 1);
 
@@ -486,11 +506,15 @@ public final class Search {
 				}
 			}
 
+			int pieceFrom = MoveFactory.GetFrom(move);
+			int movedPiece = PositionFactory.pieceAt(board, pieceFrom);
+			
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
 			stack[ply].move = move;
+			stack[ply].movedPiece = movedPiece;
 			int score;
 			if (childPv) {
 				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
@@ -527,7 +551,7 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 
 					boolean white = PositionFactory.whiteToMove(board);
-					onQuietFailHigh(white, move, Math.max(1, depth));
+					onQuietFailHigh(white, move, Math.max(1, depth), board, ply);
 				}
 				break;
 			}
@@ -618,7 +642,7 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, stack, ply);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -711,19 +735,140 @@ public final class Search {
 
 	private void clearHistory() {
 		for (int i = 0; i < history.length; i++) history[i] = 0;
+		
+		for (int i = 0; i < PIECE_TYPES; i++) {
+			for (int j = 0; j < SQUARES; j++) {
+				for (int k = 0; k < PIECE_TYPES; k++) {
+					for (int l = 0; l < SQUARES; l++) {
+						continuationHistory1[i][j][k][l] = 0;
+						continuationHistory2[i][j][k][l] = 0;
+						continuationHistory4[i][j][k][l] = 0;
+						continuationHistory6[i][j][k][l] = 0;
+					}
+				}
+			}
+		}
 	}
 
-	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
+	private int historyScore(boolean white, int move, int ply) {
+		int mainHistory = history[historyIndex(white, move)];
+		
+		int contScore = 0;
+		int to = MoveFactory.GetTo(move);
+		
+		// Get the moved piece for the current move
+		int from = MoveFactory.GetFrom(move);
+		// We'll look this up from the board in the actual call site
+		
+		// Add 1-ply continuation history
+		if (ply >= 1 && stack[ply - 1].continuationHistory != null) {
+			int[][] ch1 = stack[ply - 1].continuationHistory;
+			if (ch1 != null && ch1.length > 0 && ch1[0] != null) {
+				// Access based on board state - will be set properly in negamax
+				contScore += getContinuationScore(ch1, from, to);
+			}
+		}
+		
+		// Add 2-ply continuation history
+		if (ply >= 2 && stack[ply - 2].continuationHistory != null) {
+			int[][] ch2 = stack[ply - 2].continuationHistory;
+			if (ch2 != null && ch2.length > 0 && ch2[0] != null) {
+				contScore += getContinuationScore(ch2, from, to);
+			}
+		}
+		
+		// Add 4-ply continuation history
+		if (ply >= 4 && stack[ply - 4].continuationHistory != null) {
+			int[][] ch4 = stack[ply - 4].continuationHistory;
+			if (ch4 != null && ch4.length > 0 && ch4[0] != null) {
+				contScore += getContinuationScore(ch4, from, to);
+			}
+		}
+		
+		// Add 6-ply continuation history
+		if (ply >= 6 && stack[ply - 6].continuationHistory != null) {
+			int[][] ch6 = stack[ply - 6].continuationHistory;
+			if (ch6 != null && ch6.length > 0 && ch6[0] != null) {
+				contScore += getContinuationScore(ch6, from, to);
+			}
+		}
+		
+		return mainHistory + contScore;
+	}
+	
+	private int getContinuationScore(int[][] contHist, int from, int to) {
+		if (contHist == null || to < 0 || to >= SQUARES) return 0;
+		// contHist is indexed by [piece][square]
+		// We'll store piece info in the continuation history pointer itself
+		int total = 0;
+		for (int piece = 0; piece < PIECE_TYPES; piece++) {
+			if (contHist[piece] != null && to < contHist[piece].length) {
+				total += contHist[piece][to];
+			}
+		}
+		return total;
 	}
 
-	private void onQuietFailHigh(boolean white, int move, int depth) {
+	private void onQuietFailHigh(boolean white, int move, int depth, long[] board, int ply) {
 		int idx = historyIndex(white, move);
 		int bonus = depth * depth;
 		int current = history[idx];
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
 		history[idx] = current;
+		
+		// Update continuation history
+		int from = MoveFactory.GetFrom(move);
+		int to = MoveFactory.GetTo(move);
+		int piece = PositionFactory.pieceAt(board, from);
+		if (piece == -1) return; // Shouldn't happen
+		
+		// Update 1-ply continuation history
+		if (ply >= 1 && stack[ply - 1].movedPiece >= 0) {
+			int prevPiece = stack[ply - 1].movedPiece;
+			int prevTo = MoveFactory.GetTo(stack[ply - 1].move);
+			if (prevTo >= 0 && prevTo < SQUARES) {
+				updateContinuationHistory(continuationHistory1[prevPiece][prevTo][piece], to, bonus);
+			}
+		}
+		
+		// Update 2-ply continuation history
+		if (ply >= 2 && stack[ply - 2].movedPiece >= 0) {
+			int prevPiece = stack[ply - 2].movedPiece;
+			int prevTo = MoveFactory.GetTo(stack[ply - 2].move);
+			if (prevTo >= 0 && prevTo < SQUARES) {
+				updateContinuationHistory(continuationHistory2[prevPiece][prevTo][piece], to, bonus);
+			}
+		}
+		
+		// Update 4-ply continuation history
+		if (ply >= 4 && stack[ply - 4].movedPiece >= 0) {
+			int prevPiece = stack[ply - 4].movedPiece;
+			int prevTo = MoveFactory.GetTo(stack[ply - 4].move);
+			if (prevTo >= 0 && prevTo < SQUARES) {
+				updateContinuationHistory(continuationHistory4[prevPiece][prevTo][piece], to, bonus);
+			}
+		}
+		
+		// Update 6-ply continuation history
+		if (ply >= 6 && stack[ply - 6].movedPiece >= 0) {
+			int prevPiece = stack[ply - 6].movedPiece;
+			int prevTo = MoveFactory.GetTo(stack[ply - 6].move);
+			if (prevTo >= 0 && prevTo < SQUARES) {
+				updateContinuationHistory(continuationHistory6[prevPiece][prevTo][piece], to, bonus);
+			}
+		}
+	}
+	
+	private void updateContinuationHistory(int[] table, int index, int bonus) {
+		if (table == null || index < 0 || index >= table.length) return;
+		int current = table[index];
+		current -= (current >> HISTORY_DECAY_SHIFT);
+		current += bonus;
+		// Clamp to avoid overflow
+		if (current > 16000) current = 16000;
+		if (current < -16000) current = -16000;
+		table[index] = current;
 	}
 }
 

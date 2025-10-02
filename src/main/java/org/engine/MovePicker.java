@@ -10,9 +10,13 @@ final class MovePicker {
 	private final int ttMove;
 	private final int killerMove;
 	private final boolean includeQuiets;
+	private final Search.StackEntry[] stack;
+	private final int ply;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
+	private static final int SQUARES = 64;
+	private static final int PIECE_TYPES = 12;
 
     private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
     private Stage stage;
@@ -21,7 +25,7 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, Search.StackEntry[] stack, int ply) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
@@ -31,6 +35,8 @@ final class MovePicker {
         this.ttMove = MoveFactory.intToMove(ttMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
 		this.includeQuiets = includeQuiets;
+		this.stack = stack;
+		this.ply = ply;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
@@ -91,8 +97,57 @@ final class MovePicker {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			
+			// Add continuation history bonuses
+			if (stack != null && ply >= 0 && ply < stack.length) {
+				score += getContinuationHistoryScore(m);
+			}
+			
 			scores[i] = score;
 		}
+	}
+	
+	private int getContinuationHistoryScore(int move) {
+		int contScore = 0;
+		int to = MoveFactory.GetTo(move);
+		int from = MoveFactory.GetFrom(move);
+		int piece = PositionFactory.pieceAt(board, from);
+		
+		if (piece < 0 || piece >= PIECE_TYPES || to < 0 || to >= SQUARES) return 0;
+		
+		// 1-ply continuation history
+		if (ply >= 1 && stack[ply - 1].continuationHistory != null) {
+			int[][] ch = stack[ply - 1].continuationHistory;
+			if (ch != null && piece < ch.length && ch[piece] != null && to < ch[piece].length) {
+				contScore += ch[piece][to];
+			}
+		}
+		
+		// 2-ply continuation history
+		if (ply >= 2 && stack[ply - 2].continuationHistory != null) {
+			int[][] ch = stack[ply - 2].continuationHistory;
+			if (ch != null && piece < ch.length && ch[piece] != null && to < ch[piece].length) {
+				contScore += ch[piece][to];
+			}
+		}
+		
+		// 4-ply continuation history
+		if (ply >= 4 && stack[ply - 4].continuationHistory != null) {
+			int[][] ch = stack[ply - 4].continuationHistory;
+			if (ch != null && piece < ch.length && ch[piece] != null && to < ch[piece].length) {
+				contScore += ch[piece][to];
+			}
+		}
+		
+		// 6-ply continuation history
+		if (ply >= 6 && stack[ply - 6].continuationHistory != null) {
+			int[][] ch = stack[ply - 6].continuationHistory;
+			if (ch != null && piece < ch.length && ch[piece] != null && to < ch[piece].length) {
+				contScore += ch[piece][to];
+			}
+		}
+		
+		return contScore;
 	}
 
 	// Reusable selection helper: picks best-scored move in [listIndex, size) and swaps into listIndex
