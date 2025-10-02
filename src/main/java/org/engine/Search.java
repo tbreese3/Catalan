@@ -70,6 +70,7 @@ public final class Search {
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_DECAY_SHIFT = 8;
 	private final int[] history = new int[HISTORY_SIZE];
+	private final int[] counterMoves = new int[HISTORY_SIZE];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -154,6 +155,7 @@ public final class Search {
 		stack = new StackEntry[MAX_PLY + 5];
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
+		clearCounterMoves();
 
 		Result result = new Result();
 
@@ -335,7 +337,11 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		int prevMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+		boolean whiteSTM = PositionFactory.whiteToMove(board);
+		int cm = MoveFactory.MOVE_NONE;
+		if (!MoveFactory.isNone(prevMove)) cm = getCounterMove(!whiteSTM, prevMove);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, cm, killer, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -483,6 +489,11 @@ public final class Search {
 
 					boolean white = PositionFactory.whiteToMove(board);
 					onQuietFailHigh(white, move, Math.max(1, depth));
+
+					int parentMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+					if (!MoveFactory.isNone(parentMove)) {
+						setCounterMove(!white, parentMove, move);
+					}
 				}
 				break;
 			}
@@ -573,7 +584,11 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+        int prevMoveQ = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+        boolean whiteSTMq = PositionFactory.whiteToMove(board);
+        int cmQ = MoveFactory.MOVE_NONE;
+        if (!MoveFactory.isNone(prevMoveQ)) cmQ = getCounterMove(!whiteSTMq, prevMoveQ);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, cmQ, MoveFactory.MOVE_NONE, inCheck);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -666,6 +681,18 @@ public final class Search {
 
 	private void clearHistory() {
 		for (int i = 0; i < history.length; i++) history[i] = 0;
+	}
+
+	private void clearCounterMoves() {
+		for (int i = 0; i < counterMoves.length; i++) counterMoves[i] = MoveFactory.MOVE_NONE;
+	}
+
+	private int getCounterMove(boolean white, int prevMove) {
+		return counterMoves[historyIndex(white, prevMove)];
+	}
+
+	private void setCounterMove(boolean white, int prevMove, int replyMove) {
+		counterMoves[historyIndex(white, prevMove)] = MoveFactory.intToMove(replyMove);
 	}
 
 	private int historyScore(boolean white, int move) {
