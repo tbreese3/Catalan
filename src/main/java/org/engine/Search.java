@@ -616,9 +616,12 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-        int[] moves = moveBuffers[ply];
-        int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
+		int[] moves = moveBuffers[ply];
+		int ttMoveForQ = MoveFactory.MOVE_NONE;
+		if (ttHit) {
+			ttMoveForQ = MoveFactory.intToMove(ttEntry.getPackedMove());
+		}
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, false);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
