@@ -562,6 +562,10 @@ public final class Search {
 
 		if (pos.isDraw(board)) return 0;
 
+        if (ply >= MAX_PLY) {
+            return evaluate(board);
+        }
+
         TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
         TranspositionTable.Entry ttEntry = pr.entry;
         boolean ttHit = pr.hit;
@@ -581,55 +585,50 @@ public final class Search {
             }
         }
 
-		boolean inCheck = pos.isInCheck(board);
-		int originalAlpha = alpha;
+        boolean inCheck = pos.isInCheck(board);
+        int originalAlpha = alpha;
 
         int standPat;
+        int futilityBase;
         if (!inCheck) {
-            int rawEval;
-            if (ttStaticEval != TranspositionTable.SCORE_VOID) rawEval = ttStaticEval; else rawEval = evaluate(board);
+            int rawEval = (ttStaticEval != TranspositionTable.SCORE_VOID) ? ttStaticEval : evaluate(board);
             standPat = rawEval;
 
-            if (ttHit) {
-                int qttScore = ttEntry.getScore(ply);
-                int qttBound = ttEntry.getBound();
-                if (qttScore != TranspositionTable.SCORE_VOID) {
-                    if (qttBound == TranspositionTable.BOUND_EXACT
-                            || (qttBound == TranspositionTable.BOUND_LOWER && qttScore > standPat)
-                            || (qttBound == TranspositionTable.BOUND_UPPER && qttScore < standPat)) {
-                        standPat = qttScore;
-                    }
-                }
+            // Stand-pat improvement and cutoff
+            if (standPat > alpha) alpha = standPat;
+            if (alpha >= beta) {
+                return alpha;
             }
 
-			if (standPat >= beta) {
-				if (!ttHit && !excludedHere) {
-					boolean pvHere = (nodeType != NodeType.nonPVNode) || ttPV;
-					ttEntry.store(pos.zobrist(board), TranspositionTable.BOUND_LOWER, 0, 0, standPat, rawEval, pvHere, ply);
-				}
-                if (Math.abs(standPat) < MATE_VALUE && Math.abs(beta) < MATE_VALUE)
-                    return (standPat + beta) / 2;
-                return standPat;
-            }
-            if (standPat > alpha) alpha = standPat;
+            // Futility base like reference: standPat + 205
+            futilityBase = standPat + 205;
         } else {
-			standPat = -INFTY;
-		}
+            standPat = -INFTY;
+            futilityBase = Integer.MIN_VALUE;
+        }
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
         MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck);
 
-		boolean movePlayed = false;
+        boolean movePlayed = false;
         int bestScore = standPat;
         for (int move; !MoveFactory.isNone(move = picker.next()); ) {
 			if (stopCheck()) break;
 
-			if (!inCheck) {
-				if (SEE.see(board, move) < qsSeeMargin) {
-					continue;
-				}
-			}
+            if (!inCheck) {
+                if (bestScore > -MATE_VALUE + 1024
+                        && futilityBase < alpha
+                        && SEE.see(board, move) < 1
+                        && pos.hasNonPawnMaterialForSTM(board)) {
+                    bestScore = Math.max(bestScore, futilityBase);
+                    continue;
+                }
+
+                if (SEE.see(board, move) < qsSeeMargin) {
+                    continue;
+                }
+            }
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
