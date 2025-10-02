@@ -410,7 +410,7 @@ public final class Search {
 					se.reduction = savedReduction;
 
 					if (singularValue < singularBeta) {
-						extension = 1;
+						extension = nodeType != NodeType.pvNode && MoveFactory.GetFlags(move) != MoveFactory.FLAG_PROMOTION ? 2 : 1;
 					} else if (singularBeta >= beta) {
 						return singularBeta;
 					}
