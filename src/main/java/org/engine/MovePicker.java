@@ -21,12 +21,10 @@ final class MovePicker {
 	private boolean ttTried;
 	private boolean killerTried;
 
-		// Capture partitioning
 		private int capGoodCount;
-		private int badCount;
-		private int badIndex;
-		private final int[] badBuffer;
-		private final int[] badScores;
+		private int capTotalCount;
+		private int quietStart;
+		private int quietCount;
 
 	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
@@ -44,10 +42,9 @@ final class MovePicker {
 		this.ttTried = false;
 		this.killerTried = false;
 		this.capGoodCount = 0;
-		this.badCount = 0;
-		this.badIndex = 0;
-		this.badBuffer = new int[moveBuffer.length];
-		this.badScores = new int[scoreBuffer.length];
+		this.capTotalCount = 0;
+		this.quietStart = 0;
+		this.quietCount = 0;
 	}
 
 	private int scoreCaptureMVVLVA(int mv) {
@@ -92,8 +89,6 @@ final class MovePicker {
 
 	private void partitionCapturesBySEE(int size) {
 			capGoodCount = 0;
-			badCount = 0;
-			badIndex = 0;
 			for (int i = 0; i < size; i++) {
 				int mv = buffer[i];
 				int sc = scores[i];
@@ -106,13 +101,15 @@ final class MovePicker {
 					good = see >= 0;
 				}
 				if (good) {
-					buffer[capGoodCount] = mv;
-					scores[capGoodCount] = sc;
+					if (i != capGoodCount) {
+						int tmpM = buffer[capGoodCount];
+						buffer[capGoodCount] = mv;
+						buffer[i] = tmpM;
+						int tmpS = scores[capGoodCount];
+						scores[capGoodCount] = sc;
+						scores[i] = tmpS;
+					}
 					capGoodCount++;
-				} else {
-					badBuffer[badCount] = mv;
-					badScores[badCount] = sc;
-					badCount++;
 				}
 			}
 		}
@@ -127,6 +124,17 @@ final class MovePicker {
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
+			int m = buffer[i];
+			int idx = historyIndex(white, m);
+			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			scores[i] = score;
+		}
+	}
+
+	private void scorequietsRange(int start, int size) {
+		boolean white = PositionFactory.whiteToMove(board);
+		int end = start + size;
+		for (int i = start; i < end; i++) {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
@@ -176,36 +184,44 @@ final class MovePicker {
 						index = 0;
 						count = gen.generateCaptures(board, buffer, 0);
 						scorecaptures(count);
+						capTotalCount = count;
 						partitionCapturesBySEE(count);
+						count = capGoodCount;
 					}
-					while (index < capGoodCount) {
-						int m = getnextmove(buffer, scores, capGoodCount, index++);
+					while (index < count) {
+						int m = getnextmove(buffer, scores, count, index++);
 						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
+
+					quietStart = capTotalCount;
 					count = 0;
 					stage = includeQuiets ? Stage.QUIETS : Stage.BAD_CAPTURES;
 					break;
 				}
-                case QUIETS: {
+				case QUIETS: {
 					if (count == 0) {
-						index = 0;
-						count = gen.generateQuiets(board, buffer, 0);
-						scorequiets(count);
+						index = quietStart;
+						int newN = gen.generateQuiets(board, buffer, quietStart);
+						quietCount = newN - quietStart;
+						scorequietsRange(quietStart, quietCount);
+						count = quietStart + quietCount;
 					}
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
-                        m = MoveFactory.intToMove(m);
+						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
+					index = capGoodCount;
+					count = capTotalCount;
 					stage = Stage.BAD_CAPTURES;
 					break;
 				}
 				case BAD_CAPTURES: {
-					while (badIndex < badCount) {
-						int m = getnextmove(badBuffer, badScores, badCount, badIndex++);
+					while (index < count) {
+						int m = getnextmove(buffer, scores, count, index++);
 						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
