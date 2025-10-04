@@ -282,7 +282,7 @@ public final class Search {
 		se.pvLength = 0;
 		if (stopCheck()) return 0;
 		nodes++;
-		selDepth = Math.max(selDepth, ply);
+		selDepth = Math.max(selDepth, ply + 1);
 
 		if (pos.isDraw(board)) return 0;
 
@@ -326,8 +326,8 @@ public final class Search {
             int rawEval = (tableHit && tableEval != TranspositionTable.SCORE_VOID) ? tableEval : evaluate(board);
 			boolean excludedHere = stack[ply].excludedMove != MoveFactory.MOVE_NONE;
 			if (!tableHit && !excludedHere) {
-                boolean isPVHere = (nodeType != NodeType.nonPVNode);
-                boolean pvBitEval = isPVHere || tableWasPv;
+				boolean isPVHere = (nodeType != NodeType.nonPVNode);
+				boolean pvBitEval = isPVHere || (tableHit && tableWasPv);
                 entry.store(pos.zobrist(board), TranspositionTable.BOUND_NONE, 0, 0, TranspositionTable.SCORE_VOID, rawEval, pvBitEval, ply);
             }
             se.staticEval = rawEval;
@@ -501,7 +501,7 @@ public final class Search {
 					score = -negamax(board, depth - 1, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 				}
 				
-				if (parentIsPV && score > alpha && score < beta) {
+			if (parentIsPV && score > alpha && score < beta) {
 					score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
 			}
@@ -544,7 +544,7 @@ public final class Search {
 		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
 		int rawEval = (se.staticEval != SCORE_NONE) ? se.staticEval : 0;
 		boolean isPV = (nodeType != NodeType.nonPVNode);
-		boolean pvBit = isPV || tableWasPv;
+		boolean pvBit = isPV || (tableHit && tableWasPv);
 		boolean excludedHere = stack[ply].excludedMove != MoveFactory.MOVE_NONE;
 		if (!excludedHere) {
 			entry.store(pos.zobrist(board), resultBound, depth, MoveFactory.intToMove(bestMove), bestScore, rawEval, pvBit, ply);
@@ -558,7 +558,7 @@ public final class Search {
 		se.pvLength = 0;
 		if (stopCheck()) return 0;
 		nodes++;
-		selDepth = Math.max(selDepth, ply);
+		selDepth = Math.max(selDepth, ply + 1);
 
 		if (pos.isDraw(board)) return 0;
 
@@ -669,8 +669,11 @@ public final class Search {
 
         int rawEval = (standPat != -INFTY) ? standPat : 0;
         int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
-        int storeBound = (bestScore >= beta) ? TranspositionTable.BOUND_LOWER : TranspositionTable.BOUND_UPPER;
-        ttEntry.store(pos.zobrist(board), storeBound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
+        int storeBound = bound;
+        if (!excludedHere) {
+            boolean pvFlag = (nodeType != NodeType.nonPVNode) || (ttHit && ttPV);
+            ttEntry.store(pos.zobrist(board), storeBound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, pvFlag, ply);
+        }
 
 		return bestScore;
 	}
