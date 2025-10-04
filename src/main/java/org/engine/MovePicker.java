@@ -14,12 +14,17 @@ final class MovePicker {
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
 	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
-    private enum Stage { TT, KILLER, CAPTURES, QUIETS, DONE }
+	    private enum Stage { TT, KILLER, CAPTURES, QUIETS, BAD_CAPTURES, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
 	private boolean killerTried;
+
+		private int capGoodCount;
+		private int capTotalCount;
+		private int quietStart;
+		private int quietCount;
 
 	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
@@ -36,6 +41,10 @@ final class MovePicker {
 		this.count = 0;
 		this.ttTried = false;
 		this.killerTried = false;
+		this.capGoodCount = 0;
+		this.capTotalCount = 0;
+		this.quietStart = 0;
+		this.quietCount = 0;
 	}
 
 	private int scoreCaptureMVVLVA(int mv) {
@@ -78,6 +87,33 @@ final class MovePicker {
 		}
 	}
 
+	private void partitionCapturesBySEE(int size) {
+			capGoodCount = 0;
+			for (int i = 0; i < size; i++) {
+				int mv = buffer[i];
+				int sc = scores[i];
+				int flags = MoveFactory.GetFlags(mv);
+				boolean good;
+				if (flags == MoveFactory.FLAG_PROMOTION) {
+					good = true;
+				} else {
+					int see = SEE.see(board, mv);
+					good = see >= 0;
+				}
+				if (good) {
+					if (i != capGoodCount) {
+						int tmpM = buffer[capGoodCount];
+						buffer[capGoodCount] = mv;
+						buffer[i] = tmpM;
+						int tmpS = scores[capGoodCount];
+						scores[capGoodCount] = sc;
+						scores[i] = tmpS;
+					}
+					capGoodCount++;
+				}
+			}
+		}
+
 	private static int historyIndex(boolean white, int move) {
 		int from = MoveFactory.GetFrom(move);
 		int to = MoveFactory.GetTo(move);
@@ -88,6 +124,17 @@ final class MovePicker {
 	private void scorequiets(int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		for (int i = 0; i < size; i++) {
+			int m = buffer[i];
+			int idx = historyIndex(white, m);
+			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			scores[i] = score;
+		}
+	}
+
+	private void scorequietsRange(int start, int size) {
+		boolean white = PositionFactory.whiteToMove(board);
+		int end = start + size;
+		for (int i = start; i < end; i++) {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
@@ -132,35 +179,54 @@ final class MovePicker {
 					}
 					break;
 				}
-                case CAPTURES: {
+				case CAPTURES: {
 					if (count == 0) {
 						index = 0;
 						count = gen.generateCaptures(board, buffer, 0);
 						scorecaptures(count);
+						capTotalCount = count;
+						partitionCapturesBySEE(count);
+						count = capGoodCount;
 					}
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
-                        m = MoveFactory.intToMove(m);
+						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
+
+					quietStart = capTotalCount;
 					count = 0;
-                    stage = includeQuiets ? Stage.QUIETS : Stage.DONE;
+					stage = includeQuiets ? Stage.QUIETS : Stage.BAD_CAPTURES;
 					break;
 				}
-                case QUIETS: {
+				case QUIETS: {
 					if (count == 0) {
-						index = 0;
-						count = gen.generateQuiets(board, buffer, 0);
-						scorequiets(count);
+						index = quietStart;
+						int newN = gen.generateQuiets(board, buffer, quietStart);
+						quietCount = newN - quietStart;
+						scorequietsRange(quietStart, quietCount);
+						count = quietStart + quietCount;
 					}
 					while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
-                        m = MoveFactory.intToMove(m);
+						m = MoveFactory.intToMove(m);
 						if (m == ttMove || m == killerMove) continue;
 						return m;
 					}
-                    stage = Stage.DONE;
+					index = capGoodCount;
+					count = capTotalCount;
+					stage = Stage.BAD_CAPTURES;
+					break;
+				}
+				case BAD_CAPTURES: {
+					while (index < count) {
+						int m = getnextmove(buffer, scores, count, index++);
+						m = MoveFactory.intToMove(m);
+						if (m == ttMove || m == killerMove) continue;
+						return m;
+					}
+					stage = Stage.DONE;
 					break;
 				}
                 default:
