@@ -492,6 +492,7 @@ public final class Search {
 
 			stack[ply].move = move;
 			int score;
+			int alphaBeforeMove = alpha;
 			if (childPv) {
 				score = -negamax(board, searchDepthChild, ply + 1, -beta, -alpha, NodeType.pvNode);
 			} else {
@@ -508,6 +509,11 @@ public final class Search {
 
 			pos.undoMoveInPlace(board);
 			Eval.undoMoveAccumulator(nnueState);
+
+			if (isQuiet && score <= alphaBeforeMove) {
+				boolean white = PositionFactory.whiteToMove(board);
+				onQuietNoImprove(white, move, Math.max(1, depth));
+			}
 
 			if (isQuiet) quietsTried++;
 			if (score > bestScore) {
@@ -667,10 +673,9 @@ public final class Search {
 		else if (alpha != originalAlpha) bound = TranspositionTable.BOUND_EXACT;
 		else bound = TranspositionTable.BOUND_UPPER;
 
-        int rawEval = (standPat != -INFTY) ? standPat : 0;
-        int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
-        int storeBound = (bestScore >= beta) ? TranspositionTable.BOUND_LOWER : TranspositionTable.BOUND_UPPER;
-        ttEntry.store(pos.zobrist(board), storeBound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
+		int rawEval = (standPat != -INFTY) ? standPat : 0;
+		int bestMove = se.pvLength > 0 ? se.pv[0] : MoveFactory.MOVE_NONE;
+		ttEntry.store(pos.zobrist(board), bound, inCheck ? 1 : 0, MoveFactory.intToMove(bestMove), bestScore, rawEval, ttPV, ply);
 
 		return bestScore;
 	}
@@ -723,6 +728,15 @@ public final class Search {
 		int current = history[idx];
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
+		history[idx] = current;
+	}
+
+	private void onQuietNoImprove(boolean white, int move, int depth) {
+		int idx = historyIndex(white, move);
+		int penalty = depth * depth;
+		int current = history[idx];
+		current -= (current >> HISTORY_DECAY_SHIFT);
+		current -= penalty;
 		history[idx] = current;
 	}
 }
