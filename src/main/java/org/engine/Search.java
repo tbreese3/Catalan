@@ -68,12 +68,13 @@ public final class Search {
 	private final PositionFactory pos = new PositionFactory();
 
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
-	private static final int HISTORY_DECAY_SHIFT = 8;
+	private static final int HISTORY_MAX = 16384;
 	private final int[] history = new int[HISTORY_SIZE];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
 	private final int[][] lmrTable = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
+	private final int[][] quietBuffers = new int[MAX_PLY + 5][MAX_MOVES];
 
 	private final int lmpMaxDepth;
 	private final int lmpBaseThreshold;
@@ -134,8 +135,10 @@ public final class Search {
 	private void buildLmrTable() {
 		for (int d = 1; d <= LMR_MAX_DEPTH; d++) {
 			for (int m = 1; m <= LMR_MAX_MOVES; m++) {
-				double r = lmrBase + Math.log(d) * Math.log(m) / lmrDivisor;
-				int ir = (int) r;
+				double base = 0.75;
+				double denom = 2.5;
+				double r = base + (Math.log(d) * Math.log(m)) / denom;
+				int ir = (int) Math.round(r);
 				if (ir < 0) ir = 0;
 				lmrTable[d][m] = ir;
 			}
@@ -387,6 +390,8 @@ public final class Search {
 		int bestScore = -INFTY;
 		int i = 0;
 		int quietsTried = 0;
+		int[] quietList = quietBuffers[ply];
+		int quietCount = 0;
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
@@ -468,17 +473,16 @@ public final class Search {
 			int appliedReduction = 0;
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
-			if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1 && move != ttMoveForNode && move != killer) {
+			if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
-
+				if (parentIsPV) r = Math.max(0, r - 1);
+				if (move == killer) r = Math.max(0, r - 1);
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
-				if (hVal > 4096) r = Math.max(0, r - 2);
-				else if (hVal > 1024) r = Math.max(0, r - 1);
-
-				if (hVal < -4096) r += 1;
+				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
+				else if (hVal < -(HISTORY_MAX >> 1)) r = r + 1;
 				if (r > 0) {
 					appliedReduction = Math.min(r, depth - 1);
 					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
@@ -489,6 +493,7 @@ public final class Search {
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
+			if (isQuiet && quietCount < MAX_MOVES) quietList[quietCount++] = move;
 
 			stack[ply].move = move;
 			int score;
@@ -525,9 +530,8 @@ public final class Search {
 				if (isQuiet) {
 					int m = MoveFactory.intToMove(move);
 					if (m != 0) stack[ply].searchKiller = m;
-
 					boolean white = PositionFactory.whiteToMove(board);
-					onQuietFailHigh(white, move, Math.max(1, depth));
+					applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
 				}
 				break;
 			}
@@ -717,13 +721,29 @@ public final class Search {
 		return history[historyIndex(white, move)];
 	}
 
-	private void onQuietFailHigh(boolean white, int move, int depth) {
-		int idx = historyIndex(white, move);
-		int bonus = depth * depth;
-		int current = history[idx];
-		current -= (current >> HISTORY_DECAY_SHIFT);
-		current += bonus;
-		history[idx] = current;
+	private static int calculateHistoryBonus(int depth) {
+		int bonus = Math.max(0, depth * 300 - 300);
+		return Math.min(bonus, HISTORY_MAX - 1);
+	}
+
+	private void updateHistoryScore(int idx, int delta) {
+		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
+		int old = history[idx];
+		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
+		history[idx] = old + d - adj;
+	}
+
+	private void applyHistoryUpdatesForCutoff(boolean white, int bestMove, int depth, int[] quietMoves, int count) {
+		int bonus = calculateHistoryBonus(depth);
+		int malus = -bonus;
+		int bestIdx = historyIndex(white, bestMove);
+		updateHistoryScore(bestIdx, bonus);
+		for (int i = 0; i < count; i++) {
+			int mv = quietMoves[i];
+			if (mv == bestMove) continue;
+			int idx = historyIndex(white, mv);
+			updateHistoryScore(idx, malus);
+		}
 	}
 }
 
