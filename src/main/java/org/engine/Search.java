@@ -521,6 +521,11 @@ public final class Search {
 				}
 			}
 
+			if (nodeType == NodeType.nonPVNode && isQuiet && score <= alpha && move != ttMoveForNode && move != killer) {
+				boolean white = PositionFactory.whiteToMove(board);
+				onQuietFailLow(white, move, Math.max(1, depth));
+			}
+
 			if (alpha >= beta) {
 				if (isQuiet) {
 					int m = MoveFactory.intToMove(move);
@@ -723,6 +728,15 @@ public final class Search {
 		int current = history[idx];
 		current -= (current >> HISTORY_DECAY_SHIFT);
 		current += bonus;
+		history[idx] = current;
+	}
+
+	private void onQuietFailLow(boolean white, int move, int depth) {
+		int idx = historyIndex(white, move);
+		int penalty = depth * depth;
+		int current = history[idx];
+		current -= (current >> HISTORY_DECAY_SHIFT);
+		current -= penalty;
 		history[idx] = current;
 	}
 }
