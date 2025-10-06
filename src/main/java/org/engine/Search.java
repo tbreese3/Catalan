@@ -468,13 +468,17 @@ public final class Search {
 			}
 
 			if (extension > 0) {
-				searchDepthChild = Math.max(1, searchDepthChild + extension);
+				searchDepthChild = Math.max(0, searchDepthChild + extension);
+			}
+
+			if (searchDepthChild >= depth) {
+				searchDepthChild = Math.max(0, depth - 1);
 			}
 			int depthCut = 0;
 			boolean pvContext = (nodeType != NodeType.nonPVNode);
 			boolean pvFirstChild = pvContext && i == 0;
 
-			int tryDepth = Math.max(1, searchDepthChild);
+			int tryDepth = Math.max(0, searchDepthChild);
 			int shallowDepth = tryDepth;
 			if (!se.inCheck && !pvFirstChild && isQuiet && depth >= 3 && i >= 1) {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
@@ -486,9 +490,9 @@ public final class Search {
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
 				else if (hVal < -(HISTORY_MAX >> 1)) r = r + 1;
-				if (r > 0) {
-					depthCut = Math.min(r, Math.max(1, tryDepth));
-					shallowDepth = Math.max(1, tryDepth - depthCut);
+				if (r > 0 && tryDepth > 0) {
+					depthCut = Math.min(r, tryDepth);
+					shallowDepth = Math.max(0, tryDepth - depthCut);
 					se.reduction = depthCut;
 				}
 			}
@@ -501,16 +505,20 @@ public final class Search {
 			stack[ply].move = move;
 			int score;
 			if (pvFirstChild) {
-				score = -negamax(board, tryDepth, ply + 1, -beta, -alpha, NodeType.pvNode);
+				int dChild = Math.max(0, tryDepth);
+				score = -negamax(board, dChild, ply + 1, -beta, -alpha, NodeType.pvNode);
 			} else {
-				score = -negamax(board, shallowDepth, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+				int dZero = Math.max(0, shallowDepth);
+				score = -negamax(board, dZero, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 
 				if (score > alpha && tryDepth > shallowDepth) {
-					score = -negamax(board, tryDepth, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
+					int dUnred = Math.max(0, tryDepth);
+					score = -negamax(board, dUnred, ply + 1, -alpha - 1, -alpha, NodeType.nonPVNode);
 				}
 				
 				if (pvContext && score > alpha && score < beta) {
-					score = -negamax(board, tryDepth, ply + 1, -beta, -alpha, NodeType.pvNode);
+					int dFull = Math.max(0, tryDepth);
+					score = -negamax(board, dFull, ply + 1, -beta, -alpha, NodeType.pvNode);
 				}
 			}
 
