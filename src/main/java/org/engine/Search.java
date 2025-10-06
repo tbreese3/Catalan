@@ -474,6 +474,9 @@ public final class Search {
 			boolean parentIsPV = (nodeType != NodeType.nonPVNode);
 			boolean childPv = parentIsPV && i == 0;
 			if (!se.inCheck && !childPv && isQuiet && depth >= 3 && i >= 1) {
+				if (move == ttMoveForNode) {
+					appliedReduction = 0;
+				} else {
 				int dIdx = Math.min(depth, LMR_MAX_DEPTH);
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
@@ -487,6 +490,7 @@ public final class Search {
 					appliedReduction = Math.min(r, depth - 1);
 					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
 					se.reduction = appliedReduction;
+				}
 				}
 			}
 
