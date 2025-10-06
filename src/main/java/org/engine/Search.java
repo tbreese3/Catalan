@@ -493,10 +493,6 @@ public final class Search {
 				}
 			}
 
-			if (move == ttMoveForNode) {
-				thinDepth = tryDepth;
-				se.reduction = 0;
-			}
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
