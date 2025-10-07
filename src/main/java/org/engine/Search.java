@@ -2,6 +2,7 @@ package org.engine;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
 
 public final class Search {
 
@@ -70,6 +71,7 @@ public final class Search {
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_MAX = 16384;
 	private final int[] history = new int[HISTORY_SIZE];
+	private final int[] counterMoves = new int[HISTORY_SIZE];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -169,6 +171,7 @@ public final class Search {
 		stack = new StackEntry[MAX_PLY + 5];
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
+		clearCounterMoves();
 
 		Result result = new Result();
 
@@ -393,7 +396,14 @@ public final class Search {
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = stack[ply].searchKiller;
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true);
+		int parentMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
+		int counterForNode = MoveFactory.MOVE_NONE;
+		if (!MoveFactory.isNone(parentMove)) {
+			boolean prevWhite = !PositionFactory.whiteToMove(board);
+			int cmIdx = historyIndex(prevWhite, parentMove);
+			if (cmIdx >= 0 && cmIdx < counterMoves.length) counterForNode = counterMoves[cmIdx];
+		}
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, counterForNode, killer, /*includeQuiets=*/true);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -411,7 +421,7 @@ public final class Search {
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
 
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer && move != counterForNode) {
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
 					int dIdxF = Math.min(depth, LMR_MAX_DEPTH);
@@ -431,7 +441,7 @@ public final class Search {
 				}
 			}
 			
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer && move != counterForNode) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE) {
@@ -491,7 +501,7 @@ public final class Search {
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
 				if (parentIsPV) r = Math.max(0, r - 1);
-				if (move == killer) r = Math.max(0, r - 1);
+				if (move == killer || move == counterForNode) r = Math.max(0, r - 1);
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
@@ -546,6 +556,15 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 					boolean white = PositionFactory.whiteToMove(board);
 					applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
+
+					if (ply > 0) {
+						int prev = stack[ply - 1].move;
+						if (!MoveFactory.isNone(prev)) {
+							boolean prevWhite = !PositionFactory.whiteToMove(board);
+							int cmIdx2 = historyIndex(prevWhite, prev);
+							if (cmIdx2 >= 0 && cmIdx2 < counterMoves.length) counterMoves[cmIdx2] = MoveFactory.intToMove(move);
+						}
+					}
 				}
 				break;
 			}
@@ -729,6 +748,10 @@ public final class Search {
 
 	private void clearHistory() {
 		for (int i = 0; i < history.length; i++) history[i] = 0;
+	}
+
+	private void clearCounterMoves() {
+		for (int i = 0; i < counterMoves.length; i++) counterMoves[i] = MoveFactory.MOVE_NONE;
 	}
 
 	private int historyScore(boolean white, int move) {

@@ -12,21 +12,23 @@ final class MovePicker {
 	private final boolean includeQuiets;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
-	private static final int[] PROMO_VALUES = {320, 330, 500, 900};
+    private static final int[] PROMO_VALUES = {320, 330, 500, 900};
 
-	    private enum Stage { TT, KILLER, CAPTURES, QUIETS, BAD_CAPTURES, DONE }
+        private enum Stage { TT, COUNTER, KILLER, CAPTURES, QUIETS, BAD_CAPTURES, DONE }
     private Stage stage;
 	private int index;
 	private int count;
 	private boolean ttTried;
+    private final int counterMove;
 	private boolean killerTried;
+    private boolean counterTried;
 
 		private int capGoodCount;
 		private int capTotalCount;
 		private int quietStart;
-		private int quietCount;
+        private int quietCount;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+    MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int counterMove, int killerMove, boolean includeQuiets) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
@@ -34,12 +36,14 @@ final class MovePicker {
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
         this.ttMove = MoveFactory.intToMove(ttMove);
+        this.counterMove = MoveFactory.intToMove(counterMove);
         this.killerMove = MoveFactory.intToMove(killerMove);
 		this.includeQuiets = includeQuiets;
         this.stage = Stage.TT;
 		this.index = 0;
 		this.count = 0;
 		this.ttTried = false;
+        this.counterTried = false;
 		this.killerTried = false;
 		this.capGoodCount = 0;
 		this.capTotalCount = 0;
@@ -159,17 +163,26 @@ final class MovePicker {
 		return moves[listIndex];
 	}
 
-	int next() {
+    int next() {
         for (;;) {
             switch (stage) {
                 case TT: {
-                    stage = Stage.KILLER;
+                    stage = Stage.COUNTER;
                     if (!ttTried && !MoveFactory.isNone(ttMove)) {
 						ttTried = true;
 						if (pos.isPseudoLegalMove(board, ttMove, gen)) return ttMove;
 					}
 					break;
 				}
+                case COUNTER: {
+                    stage = Stage.KILLER;
+                    if (!includeQuiets) break;
+                    if (!counterTried && !MoveFactory.isNone(counterMove) && counterMove != ttMove) {
+                        counterTried = true;
+                        if (pos.isPseudoLegalMove(board, counterMove, gen)) return counterMove;
+                    }
+                    break;
+                }
                 case KILLER: {
                     stage = Stage.CAPTURES;
 					if (!includeQuiets) break;
@@ -188,10 +201,10 @@ final class MovePicker {
 						partitionCapturesBySEE(count);
 						count = capGoodCount;
 					}
-					while (index < count) {
+                    while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
 						m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+                        if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
 
@@ -208,10 +221,10 @@ final class MovePicker {
 						scorequietsRange(quietStart, quietCount);
 						count = quietStart + quietCount;
 					}
-					while (index < count) {
+                    while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
 						m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+                        if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
 					index = capGoodCount;
@@ -220,10 +233,10 @@ final class MovePicker {
 					break;
 				}
 				case BAD_CAPTURES: {
-					while (index < count) {
+                    while (index < count) {
 						int m = getnextmove(buffer, scores, count, index++);
 						m = MoveFactory.intToMove(m);
-						if (m == ttMove || m == killerMove) continue;
+                        if (m == ttMove || m == killerMove || m == counterMove) continue;
 						return m;
 					}
 					stage = Stage.DONE;
