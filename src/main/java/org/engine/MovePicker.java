@@ -174,15 +174,6 @@ final class MovePicker {
 					}
 					break;
 				}
-                case COUNTER: {
-                    stage = Stage.KILLER;
-                    if (!includeQuiets) break;
-                    if (!counterTried && !MoveFactory.isNone(counterMove) && counterMove != ttMove) {
-                        counterTried = true;
-                        if (pos.isPseudoLegalMove(board, counterMove, gen)) return counterMove;
-                    }
-                    break;
-                }
                 case KILLER: {
                     stage = Stage.CAPTURES;
 					if (!includeQuiets) break;
@@ -190,7 +181,15 @@ final class MovePicker {
 						killerTried = true;
                         if (pos.isPseudoLegalMove(board, killerMove, gen)) return killerMove;
 					}
-					break;
+                }
+                case COUNTER: {
+                    stage = Stage.CAPTURES;
+                    if (!includeQuiets) break;
+                    if (!counterTried && !MoveFactory.isNone(counterMove) && counterMove != ttMove && counterMove != killerMove) {
+                        counterTried = true;
+                        if (pos.isPseudoLegalMove(board, counterMove, gen) && PositionFactory.isQuiet(board, counterMove)) return counterMove;
+                    }
+                    break;
 				}
 				case CAPTURES: {
 					if (count == 0) {
