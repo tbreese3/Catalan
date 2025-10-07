@@ -135,8 +135,8 @@ public final class Search {
 	private void buildLmrTable() {
 		for (int d = 1; d <= LMR_MAX_DEPTH; d++) {
 			for (int m = 1; m <= LMR_MAX_MOVES; m++) {
-				double base = 0.75;
-				double denom = 2.5;
+				double base = lmrBase;
+				double denom = lmrDivisor;
 				double r = base + (Math.log(d) * Math.log(m)) / denom;
 				int ir = (int) Math.round(r);
 				if (ir < 0) ir = 0;
@@ -289,7 +289,15 @@ public final class Search {
 
 		if (pos.isDraw(board)) return 0;
 
-        TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
+		if (nodeType != NodeType.rootNode && depth > 0) {
+			int alphaMate = -MATE_VALUE + ply;
+			int betaMate = MATE_VALUE - ply - 1;
+			if (alpha < alphaMate) alpha = alphaMate;
+			if (beta > betaMate) beta = betaMate;
+			if (alpha >= beta) return alpha;
+		}
+
+		TranspositionTable.ProbeResult pr = TranspositionTable.TT.probe(pos.zobrist(board));
 		TranspositionTable.Entry entry = pr.entry;
         boolean tableHit = pr.hit;
 		int tableScore = 0;
@@ -311,6 +319,8 @@ public final class Search {
                 if (boundAllows) return tableScore;
             }
 		}
+		
+
 
 		boolean inCheck = pos.isInCheck(board);
 		se.inCheck = inCheck;
