@@ -399,8 +399,7 @@ public final class Search {
 		int parentMove = (ply > 0) ? stack[ply - 1].move : MoveFactory.MOVE_NONE;
 		int counterForNode = MoveFactory.MOVE_NONE;
 		if (!MoveFactory.isNone(parentMove)) {
-			boolean prevWhite = !PositionFactory.whiteToMove(board);
-			int cmIdx = historyIndex(prevWhite, parentMove);
+			int cmIdx = counterIndex(board, parentMove);
 			if (cmIdx >= 0 && cmIdx < counterMoves.length) counterForNode = counterMoves[cmIdx];
 		}
 		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, counterForNode, killer, /*includeQuiets=*/true);
@@ -421,7 +420,7 @@ public final class Search {
 
 			boolean isQuiet = PositionFactory.isQuiet(board, move);
 
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer && move != counterForNode) {
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && move != ttMoveForNode && move != killer) {
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE && pos.hasNonPawnMaterialForSTM(board)) {
 					int dIdxF = Math.min(depth, LMR_MAX_DEPTH);
@@ -441,7 +440,7 @@ public final class Search {
 				}
 			}
 			
-			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer && move != counterForNode) {
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && isQuiet && depth <= lmpMaxDepth && move != ttMoveForNode && move != killer) {
 				int threshold = lmpBaseThreshold + lmpPerDepth * depth;
 				int eval = se.staticEval;
 				if (eval != SCORE_NONE) {
@@ -501,7 +500,7 @@ public final class Search {
 				int mIdx = Math.min(i + 1, LMR_MAX_MOVES);
 				int r = lmrTable[dIdx][mIdx];
 				if (parentIsPV) r = Math.max(0, r - 1);
-				if (move == killer || move == counterForNode) r = Math.max(0, r - 1);
+				if (move == killer) r = Math.max(0, r - 1);
 				boolean whiteSTM = PositionFactory.whiteToMove(board);
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
@@ -560,8 +559,7 @@ public final class Search {
 					if (ply > 0) {
 						int prev = stack[ply - 1].move;
 						if (!MoveFactory.isNone(prev)) {
-							boolean prevWhite = !PositionFactory.whiteToMove(board);
-							int cmIdx2 = historyIndex(prevWhite, prev);
+							int cmIdx2 = counterIndex(board, prev);
 							if (cmIdx2 >= 0 && cmIdx2 < counterMoves.length) counterMoves[cmIdx2] = MoveFactory.intToMove(move);
 						}
 					}
@@ -744,6 +742,17 @@ public final class Search {
 		int to = MoveFactory.GetTo(move);
 		int side = white ? 0 : 1;
 		return (side << 12) | (from << 6) | to;
+	}
+
+	private static int counterIndex(long[] board, int prevMove) {
+		int from = MoveFactory.GetFrom(prevMove);
+		int to = MoveFactory.GetTo(prevMove);
+		int piece = PositionFactory.pieceAt(board, from);
+		if (piece == -1) {
+			piece = PositionFactory.pieceAt(board, to);
+		}
+		if (piece == -1) return -1;
+		return piece * 64 + to;
 	}
 
 	private void clearHistory() {
