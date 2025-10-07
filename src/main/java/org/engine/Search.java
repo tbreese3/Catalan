@@ -135,8 +135,8 @@ public final class Search {
 	private void buildLmrTable() {
 		for (int d = 1; d <= LMR_MAX_DEPTH; d++) {
 			for (int m = 1; m <= LMR_MAX_MOVES; m++) {
-				double base = 0.75;
-				double denom = 2.5;
+				double base = lmrBase;
+				double denom = lmrDivisor;
 				double r = base + (Math.log(d) * Math.log(m)) / denom;
 				int ir = (int) Math.round(r);
 				if (ir < 0) ir = 0;
@@ -311,6 +311,12 @@ public final class Search {
                 if (boundAllows) return tableScore;
             }
 		}
+		
+		int alphaMate = -MATE_VALUE + ply;
+		int betaMate = MATE_VALUE - ply;
+		if (alpha < alphaMate) alpha = alphaMate;
+		if (beta > betaMate) beta = betaMate;
+		if (alpha >= beta) return alpha;
 
 		boolean inCheck = pos.isInCheck(board);
 		se.inCheck = inCheck;
