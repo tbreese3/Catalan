@@ -6,9 +6,12 @@ final class MovePicker {
 	private final MoveGenerator gen;
 	private final int[] buffer;
 	private final int[] scores;
-	private final int[] history;
-	private final int[][] contHistory1;
-	private final int prevCtxIdx;
+	private final int[][][] history;
+	private final int[][][][][][] contHistory;
+	private final int prevPlaneInCheck;
+	private final int prevPlaneIsCap;
+	private final int prevPieceIdx;
+	private final int prevToSq;
 	private final int ttMove;
 	private final int killerMove;
 	private final int counterMove;
@@ -28,13 +31,16 @@ final class MovePicker {
 		private int quietStart;
 		private int quietCount;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[][] contHistory1, int prevCtxIdx, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int counterMove) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[][][] history, int[][][][][][] contHistory, int prevPlaneInCheck, int prevPlaneIsCap, int prevPieceIdx, int prevToSq, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int counterMove) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.history = history;
-		this.contHistory1 = contHistory1;
-		this.prevCtxIdx = prevCtxIdx;
+		this.contHistory = contHistory;
+		this.prevPlaneInCheck = prevPlaneInCheck;
+		this.prevPlaneIsCap = prevPlaneIsCap;
+		this.prevPieceIdx = prevPieceIdx;
+		this.prevToSq = prevToSq;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
 		this.ttMove = MoveFactory.intToMove(ttMove);
@@ -118,27 +124,23 @@ final class MovePicker {
 			}
 		}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
+ 
 
 	private void scorequietsRange(int start, int size) {
 		boolean white = PositionFactory.whiteToMove(board);
 		int end = start + size;
 		for (int i = start; i < end; i++) {
 			int m = buffer[i];
-			int idx = historyIndex(white, m);
-			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
-
-			if (contHistory1 != null && prevCtxIdx >= 0 && prevCtxIdx < contHistory1.length) {
+            int s = white ? 0 : 1;
+            int f = MoveFactory.GetFrom(m);
+            int t = MoveFactory.GetTo(m);
+            int score = history != null ? history[s][f][t] : 0;
+			if (contHistory != null && prevPlaneInCheck >= 0 && prevPlaneIsCap >= 0 && prevPieceIdx >= 0 && prevToSq >= 0) {
+				int from = MoveFactory.GetFrom(m);
 				int to = MoveFactory.GetTo(m);
-				if (to >= 0 && to < 64) {
-					int ch = contHistory1[prevCtxIdx][to];
-					score += ch;
-				}
+				int piece = PositionFactory.pieceAt(board, from);
+                int ch = contHistory[prevPlaneInCheck][prevPlaneIsCap][prevPieceIdx][prevToSq][piece][to];
+				score += ch;
 			}
 			if (MoveFactory.intToMove(m) == counterMove) {
 				score = Integer.MAX_VALUE - 10000;

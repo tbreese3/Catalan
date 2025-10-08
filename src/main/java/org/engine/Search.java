@@ -37,6 +37,10 @@ public final class Search {
 		int searchKiller;
 		int staticEval;
 		int reduction;
+		int contPlaneInCheck;
+		int contPlaneIsCapture;
+		int contPrevPiece;
+		int contPrevTo;
 
 		StackEntry() {
 			this.pv = new int[MAX_PLY];
@@ -47,6 +51,10 @@ public final class Search {
 			this.searchKiller = MoveFactory.MOVE_NONE;
 			this.staticEval = SCORE_NONE;
 			this.reduction = 0;
+			this.contPlaneInCheck = -1;
+			this.contPlaneIsCapture = -1;
+			this.contPrevPiece = -1;
+			this.contPrevTo = -1;
 		}
 	}
 
@@ -69,9 +77,14 @@ public final class Search {
 
 	private static final int HISTORY_SIZE = 2 * 64 * 64;
 	private static final int HISTORY_MAX = 16384;
-	private final int[] history = new int[HISTORY_SIZE];
-	private final int[] counterMoves = new int[HISTORY_SIZE];
-	private final int[][] contHistory1 = new int[HISTORY_SIZE][64];
+	private final int[][][] history = new int[2][64][64];
+	private final int[][][] counterMoves = new int[2][64][64];
+
+	private static final int CH_INCHECK = 2;
+	private static final int CH_ISCAP = 2;
+	private static final int CH_PIECES = 12;
+	private static final int CH_SQ = 64;
+	private final int[][][][][][] contHistory = new int[CH_INCHECK][CH_ISCAP][CH_PIECES][CH_SQ][CH_PIECES][CH_SQ];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -172,7 +185,7 @@ public final class Search {
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
 		clearCounterMoves();
-		clearContHistory1();
+		clearContHistory();
 
 		Result result = new Result();
 
@@ -398,18 +411,22 @@ public final class Search {
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = MoveFactory.MOVE_NONE;
 		int counterToPass = MoveFactory.MOVE_NONE;
-		int prevCtxIdx = -1;
 		if (!inCheck && ply > 0) {
 			int prev = stack[ply - 1].move;
 			if (!MoveFactory.isNone(prev)) {
 				boolean prevWhite = !PositionFactory.whiteToMove(board);
-				int cIdx = historyIndex(prevWhite, prev);
-				prevCtxIdx = cIdx;
-				if (cIdx >= 0 && cIdx < counterMoves.length) counterToPass = counterMoves[cIdx];
+				int s = prevWhite ? 0 : 1;
+				int f = MoveFactory.GetFrom(prev);
+				int t = MoveFactory.GetTo(prev);
+				counterToPass = counterMoves[s][f][t];
 			}
 			killer = stack[ply].searchKiller;
 		}
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory1, prevCtxIdx, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
+		int prevPlaneInCheck = stack[ply].contPlaneInCheck;
+		int prevPlaneIsCap = stack[ply].contPlaneIsCapture;
+		int prevPieceIdx = stack[ply].contPrevPiece;
+		int prevToSq = stack[ply].contPrevTo;
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, prevPlaneInCheck, prevPlaneIsCap, prevPieceIdx, prevToSq, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -512,8 +529,11 @@ public final class Search {
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
 				else if (hVal < -(HISTORY_MAX >> 1)) r = r + 1;
-				if (prevCtxIdx >= 0) {
-					int chVal = contHistoryScore1(prevCtxIdx, move);
+				if (prevPieceIdx >= 0 && prevPlaneInCheck >= 0 && prevPlaneIsCap >= 0 && prevToSq >= 0) {
+					int fromSq = MoveFactory.GetFrom(move);
+					int moverPiece = PositionFactory.pieceAt(board, fromSq);
+					int toSq = MoveFactory.GetTo(move);
+					int chVal = contHistoryScore(prevPlaneInCheck, prevPlaneIsCap, prevPieceIdx, prevToSq, moverPiece, toSq);
 					if (chVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
 					else if (chVal < -(HISTORY_MAX >> 1)) r = r + 1;
 				}
@@ -524,6 +544,16 @@ public final class Search {
 				}
 				}
 			}
+
+			int fromSq = MoveFactory.GetFrom(move);
+			int toSq = MoveFactory.GetTo(move);
+			int moverPiece = PositionFactory.pieceAt(board, fromSq);
+			int flags = MoveFactory.GetFlags(move);
+			boolean isCap = (flags == MoveFactory.FLAG_EN_PASSANT) || (PositionFactory.pieceAt(board, toSq) != -1);
+			stack[ply + 1].contPlaneInCheck = se.inCheck ? 1 : 0;
+			stack[ply + 1].contPlaneIsCapture = isCap ? 1 : 0;
+			stack[ply + 1].contPrevPiece = moverPiece;
+			stack[ply + 1].contPrevTo = toSq;
 
 			Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
@@ -567,15 +597,17 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 					boolean white = PositionFactory.whiteToMove(board);
 					applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
-					if (prevCtxIdx >= 0) {
-						applyContHistoryUpdatesForCutoff(prevCtxIdx, move, Math.max(1, depth), quietList, quietCount);
+					if (prevPieceIdx >= 0 && prevPlaneInCheck >= 0 && prevPlaneIsCap >= 0 && prevToSq >= 0) {
+						applyContHistoryUpdatesForCutoff(prevPlaneInCheck, prevPlaneIsCap, prevPieceIdx, prevToSq, move, Math.max(1, depth), quietList, quietCount, board);
 					}
 					if (ply > 0) {
 						int prev = stack[ply - 1].move;
 						if (!MoveFactory.isNone(prev)) {
 							boolean prevWhite = !PositionFactory.whiteToMove(board);
-							int cIdx = historyIndex(prevWhite, prev);
-							if (cIdx >= 0 && cIdx < counterMoves.length) counterMoves[cIdx] = MoveFactory.intToMove(move);
+							int s = prevWhite ? 0 : 1;
+							int f = MoveFactory.GetFrom(prev);
+							int t = MoveFactory.GetTo(prev);
+							counterMoves[s][f][t] = MoveFactory.intToMove(move);
 						}
 					}
 				}
@@ -668,15 +700,11 @@ public final class Search {
 
 		int[] moves = moveBuffers[ply];
 		int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-		int prevCtxIdxQ = -1;
-		if (ply > 0) {
-			int prev = stack[ply - 1].move;
-			if (!MoveFactory.isNone(prev)) {
-				boolean prevWhite = !PositionFactory.whiteToMove(board);
-				prevCtxIdxQ = historyIndex(prevWhite, prev);
-			}
-		}
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory1, prevCtxIdxQ, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
+		int prevPlaneInCheckQ = stack[ply].contPlaneInCheck;
+		int prevPlaneIsCapQ = stack[ply].contPlaneIsCapture;
+		int prevPieceIdxQ = stack[ply].contPrevPiece;
+		int prevToSqQ = stack[ply].contPrevTo;
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory, prevPlaneInCheckQ, prevPlaneIsCapQ, prevPieceIdxQ, prevToSqQ, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -689,7 +717,18 @@ public final class Search {
 				}
 			}
 
-			Eval.doMoveAccumulator(nnueState, board, move);
+            // Prepare continuation context for child
+            int fromSq = MoveFactory.GetFrom(move);
+            int toSq = MoveFactory.GetTo(move);
+            int moverPiece = PositionFactory.pieceAt(board, fromSq);
+            int flags = MoveFactory.GetFlags(move);
+            boolean isCap = (flags == MoveFactory.FLAG_EN_PASSANT) || (PositionFactory.pieceAt(board, toSq) != -1);
+            stack[ply + 1].contPlaneInCheck = inCheck ? 1 : 0;
+            stack[ply + 1].contPlaneIsCapture = isCap ? 1 : 0;
+            stack[ply + 1].contPrevPiece = moverPiece;
+            stack[ply + 1].contPrevTo = toSq;
+
+            Eval.doMoveAccumulator(nnueState, board, move);
 			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
 			movePlayed = true;
 
@@ -760,36 +799,39 @@ public final class Search {
 		return pv;
 	}
 
-	private static int historyIndex(boolean white, int move) {
-		int from = MoveFactory.GetFrom(move);
-		int to = MoveFactory.GetTo(move);
-		int side = white ? 0 : 1;
-		return (side << 12) | (from << 6) | to;
-	}
+ 
 
 	private void clearHistory() {
-		for (int i = 0; i < history.length; i++) history[i] = 0;
+		for (int s = 0; s < 2; s++)
+			for (int f = 0; f < 64; f++)
+				for (int t = 0; t < 64; t++) history[s][f][t] = 0;
 	}
 
 	private void clearCounterMoves() {
-		for (int i = 0; i < counterMoves.length; i++) counterMoves[i] = MoveFactory.MOVE_NONE;
+		for (int s = 0; s < 2; s++)
+			for (int f = 0; f < 64; f++)
+				for (int t = 0; t < 64; t++) counterMoves[s][f][t] = MoveFactory.MOVE_NONE;
 	}
 
-	private void clearContHistory1() {
-		for (int i = 0; i < contHistory1.length; i++) {
-			int[] row = contHistory1[i];
-			for (int j = 0; j < 64; j++) row[j] = 0;
-		}
+	private void clearContHistory() {
+		for (int a = 0; a < CH_INCHECK; a++)
+			for (int b = 0; b < CH_ISCAP; b++)
+				for (int c = 0; c < CH_PIECES; c++)
+					for (int d = 0; d < CH_SQ; d++)
+						for (int e = 0; e < CH_PIECES; e++)
+							for (int f = 0; f < CH_SQ; f++) contHistory[a][b][c][d][e][f] = -50;
 	}
 
 	private int historyScore(boolean white, int move) {
-		return history[historyIndex(white, move)];
+		int s = white ? 0 : 1;
+		int f = MoveFactory.GetFrom(move);
+		int t = MoveFactory.GetTo(move);
+		return history[s][f][t];
 	}
 
-	private int contHistoryScore1(int prevIdx, int move) {
-		if (prevIdx < 0 || prevIdx >= contHistory1.length) return 0;
-		int to = MoveFactory.GetTo(move);
-		return contHistory1[prevIdx][to];
+	private int contHistoryScore(int inCheckPlane, int isCapPlane, int prevPiece, int prevTo, int currPiece, int currTo) {
+		if (inCheckPlane < 0 || isCapPlane < 0 || prevPiece < 0 || prevTo < 0 || currPiece < 0 || currTo < 0) return 0;
+		return contHistory[inCheckPlane][isCapPlane][prevPiece][prevTo][currPiece][currTo];
 	}
 
 	private static int calculateHistoryBonus(int depth) {
@@ -797,11 +839,19 @@ public final class Search {
 		return Math.min(bonus, HISTORY_MAX - 1);
 	}
 
-	private void updateHistoryScore(int idx, int delta) {
+	private void updateHistoryScore3D(int side, int from, int to, int delta) {
 		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
-		int old = history[idx];
+		int old = history[side][from][to];
 		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
-		history[idx] = old + d - adj;
+		history[side][from][to] = old + d - adj;
+	}
+
+	private void updateContHistory(int inCheckPlane, int isCapPlane, int prevPiece, int prevTo, int currPiece, int currTo, int delta) {
+		if (inCheckPlane < 0 || isCapPlane < 0 || prevPiece < 0 || prevTo < 0 || currPiece < 0 || currTo < 0) return;
+		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
+		int old = contHistory[inCheckPlane][isCapPlane][prevPiece][prevTo][currPiece][currTo];
+		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
+		contHistory[inCheckPlane][isCapPlane][prevPiece][prevTo][currPiece][currTo] = old + d - adj;
 	}
 
 	private void updateContHistory1(int prevIdx, int move, int delta) {
@@ -816,25 +866,33 @@ public final class Search {
 	private void applyHistoryUpdatesForCutoff(boolean white, int bestMove, int depth, int[] quietMoves, int count) {
 		int bonus = calculateHistoryBonus(depth);
 		int malus = -bonus;
-		int bestIdx = historyIndex(white, bestMove);
-		updateHistoryScore(bestIdx, bonus);
+		int s = white ? 0 : 1;
+		int bf = MoveFactory.GetFrom(bestMove);
+		int bt = MoveFactory.GetTo(bestMove);
+		updateHistoryScore3D(s, bf, bt, bonus);
 		for (int i = 0; i < count; i++) {
 			int mv = quietMoves[i];
 			if (mv == bestMove) continue;
-			int idx = historyIndex(white, mv);
-			updateHistoryScore(idx, malus);
+			int f = MoveFactory.GetFrom(mv);
+			int t = MoveFactory.GetTo(mv);
+			updateHistoryScore3D(s, f, t, malus);
 		}
 	}
 
-	private void applyContHistoryUpdatesForCutoff(int prevIdx, int bestMove, int depth, int[] quietMoves, int count) {
-		if (prevIdx < 0 || prevIdx >= contHistory1.length) return;
+	private void applyContHistoryUpdatesForCutoff(int inCheckPlane, int isCapPlane, int prevPiece, int prevTo, int bestMove, int depth, int[] quietMoves, int count, long[] board) {
 		int bonus = calculateHistoryBonus(depth);
 		int malus = -bonus;
-		updateContHistory1(prevIdx, bestMove, bonus);
+		int bestFrom = MoveFactory.GetFrom(bestMove);
+		int bestTo = MoveFactory.GetTo(bestMove);
+		int bestPiece = PositionFactory.pieceAt(board, bestFrom);
+		updateContHistory(inCheckPlane, isCapPlane, prevPiece, prevTo, bestPiece, bestTo, bonus);
 		for (int i = 0; i < count; i++) {
 			int mv = quietMoves[i];
 			if (mv == bestMove) continue;
-			updateContHistory1(prevIdx, mv, malus);
+			int from = MoveFactory.GetFrom(mv);
+			int to = MoveFactory.GetTo(mv);
+			int piece = PositionFactory.pieceAt(board, from);
+			updateContHistory(inCheckPlane, isCapPlane, prevPiece, prevTo, piece, to, malus);
 		}
 	}
 }
