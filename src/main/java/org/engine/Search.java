@@ -71,6 +71,7 @@ public final class Search {
 	private static final int HISTORY_MAX = 16384;
 	private final int[] history = new int[HISTORY_SIZE];
 	private final int[] counterMoves = new int[HISTORY_SIZE];
+	private final int[][] contHistory1 = new int[HISTORY_SIZE][64];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
@@ -171,6 +172,7 @@ public final class Search {
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
 		clearCounterMoves();
+		clearContHistory1();
 
 		Result result = new Result();
 
@@ -396,16 +398,18 @@ public final class Search {
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
 		int killer = MoveFactory.MOVE_NONE;
 		int counterToPass = MoveFactory.MOVE_NONE;
+		int prevCtxIdx = -1;
 		if (!inCheck && ply > 0) {
 			int prev = stack[ply - 1].move;
 			if (!MoveFactory.isNone(prev)) {
 				boolean prevWhite = !PositionFactory.whiteToMove(board);
 				int cIdx = historyIndex(prevWhite, prev);
+				prevCtxIdx = cIdx;
 				if (cIdx >= 0 && cIdx < counterMoves.length) counterToPass = counterMoves[cIdx];
 			}
 			killer = stack[ply].searchKiller;
 		}
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory1, prevCtxIdx, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -508,6 +512,11 @@ public final class Search {
 				int hVal = historyScore(whiteSTM, move);
 				if (hVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
 				else if (hVal < -(HISTORY_MAX >> 1)) r = r + 1;
+				if (prevCtxIdx >= 0) {
+					int chVal = contHistoryScore1(prevCtxIdx, move);
+					if (chVal > (HISTORY_MAX >> 1)) r = Math.max(0, r - 1);
+					else if (chVal < -(HISTORY_MAX >> 1)) r = r + 1;
+				}
 				if (r > 0) {
 					appliedReduction = Math.min(r, depth - 1);
 					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
@@ -558,6 +567,9 @@ public final class Search {
 					if (m != 0) stack[ply].searchKiller = m;
 					boolean white = PositionFactory.whiteToMove(board);
 					applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
+					if (prevCtxIdx >= 0) {
+						applyContHistoryUpdatesForCutoff(prevCtxIdx, move, Math.max(1, depth), quietList, quietCount);
+					}
 					if (ply > 0) {
 						int prev = stack[ply - 1].move;
 						if (!MoveFactory.isNone(prev)) {
@@ -654,9 +666,17 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-        int[] moves = moveBuffers[ply];
-        int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
+		int[] moves = moveBuffers[ply];
+		int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
+		int prevCtxIdxQ = -1;
+		if (ply > 0) {
+			int prev = stack[ply - 1].move;
+			if (!MoveFactory.isNone(prev)) {
+				boolean prevWhite = !PositionFactory.whiteToMove(board);
+				prevCtxIdxQ = historyIndex(prevWhite, prev);
+			}
+		}
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, contHistory1, prevCtxIdxQ, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -755,8 +775,21 @@ public final class Search {
 		for (int i = 0; i < counterMoves.length; i++) counterMoves[i] = MoveFactory.MOVE_NONE;
 	}
 
+	private void clearContHistory1() {
+		for (int i = 0; i < contHistory1.length; i++) {
+			int[] row = contHistory1[i];
+			for (int j = 0; j < 64; j++) row[j] = 0;
+		}
+	}
+
 	private int historyScore(boolean white, int move) {
 		return history[historyIndex(white, move)];
+	}
+
+	private int contHistoryScore1(int prevIdx, int move) {
+		if (prevIdx < 0 || prevIdx >= contHistory1.length) return 0;
+		int to = MoveFactory.GetTo(move);
+		return contHistory1[prevIdx][to];
 	}
 
 	private static int calculateHistoryBonus(int depth) {
@@ -771,6 +804,15 @@ public final class Search {
 		history[idx] = old + d - adj;
 	}
 
+	private void updateContHistory1(int prevIdx, int move, int delta) {
+		if (prevIdx < 0 || prevIdx >= contHistory1.length) return;
+		int to = MoveFactory.GetTo(move);
+		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
+		int old = contHistory1[prevIdx][to];
+		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
+		contHistory1[prevIdx][to] = old + d - adj;
+	}
+
 	private void applyHistoryUpdatesForCutoff(boolean white, int bestMove, int depth, int[] quietMoves, int count) {
 		int bonus = calculateHistoryBonus(depth);
 		int malus = -bonus;
@@ -781,6 +823,18 @@ public final class Search {
 			if (mv == bestMove) continue;
 			int idx = historyIndex(white, mv);
 			updateHistoryScore(idx, malus);
+		}
+	}
+
+	private void applyContHistoryUpdatesForCutoff(int prevIdx, int bestMove, int depth, int[] quietMoves, int count) {
+		if (prevIdx < 0 || prevIdx >= contHistory1.length) return;
+		int bonus = calculateHistoryBonus(depth);
+		int malus = -bonus;
+		updateContHistory1(prevIdx, bestMove, bonus);
+		for (int i = 0; i < count; i++) {
+			int mv = quietMoves[i];
+			if (mv == bestMove) continue;
+			updateContHistory1(prevIdx, mv, malus);
 		}
 	}
 }
