@@ -854,14 +854,7 @@ public final class Search {
 		contHistory[inCheckPlane][isCapPlane][prevPiece][prevTo][currPiece][currTo] = old + d - adj;
 	}
 
-	private void updateContHistory1(int prevIdx, int move, int delta) {
-		if (prevIdx < 0 || prevIdx >= contHistory1.length) return;
-		int to = MoveFactory.GetTo(move);
-		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
-		int old = contHistory1[prevIdx][to];
-		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
-		contHistory1[prevIdx][to] = old + d - adj;
-	}
+ 
 
 	private void applyHistoryUpdatesForCutoff(boolean white, int bestMove, int depth, int[] quietMoves, int count) {
 		int bonus = calculateHistoryBonus(depth);
