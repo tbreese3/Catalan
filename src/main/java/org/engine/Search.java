@@ -394,7 +394,7 @@ public final class Search {
 
 		int[] moves = moveBuffers[ply];
 		int ttMoveForNode = tableHit ? MoveFactory.intToMove(entry.getPackedMove()) : MoveFactory.MOVE_NONE;
-		int killer = stack[ply].searchKiller;
+		int killer = MoveFactory.MOVE_NONE;
 		int counterToPass = MoveFactory.MOVE_NONE;
 		if (!inCheck && ply > 0) {
 			int prev = stack[ply - 1].move;
@@ -403,8 +403,9 @@ public final class Search {
 				int cIdx = historyIndex(prevWhite, prev);
 				if (cIdx >= 0 && cIdx < counterMoves.length) counterToPass = counterMoves[cIdx];
 			}
+			killer = stack[ply].searchKiller;
 		}
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, /*includeQuiets=*/true, counterToPass);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
