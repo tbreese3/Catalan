@@ -9,6 +9,7 @@ final class MovePicker {
 	private final int[] history;
 	private final int ttMove;
 	private final int killerMove;
+	private final int counterMove;
 	private final boolean includeQuiets;
 
 	private static final int[] PIECE_VALUES = {100, 320, 330, 500, 900, 20000, 100, 320, 330, 500, 900, 20000};
@@ -26,15 +27,16 @@ final class MovePicker {
 		private int quietStart;
 		private int quietCount;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int counterMove) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.history = history;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
-        this.ttMove = MoveFactory.intToMove(ttMove);
-        this.killerMove = MoveFactory.intToMove(killerMove);
+		this.ttMove = MoveFactory.intToMove(ttMove);
+		this.killerMove = MoveFactory.intToMove(killerMove);
+		this.counterMove = MoveFactory.intToMove(counterMove);
 		this.includeQuiets = includeQuiets;
         this.stage = Stage.TT;
 		this.index = 0;
@@ -127,6 +129,9 @@ final class MovePicker {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			if (MoveFactory.intToMove(m) == counterMove) {
+				score = Integer.MAX_VALUE - 10000;
+			}
 			scores[i] = score;
 		}
 	}
@@ -138,6 +143,9 @@ final class MovePicker {
 			int m = buffer[i];
 			int idx = historyIndex(white, m);
 			int score = (history != null && idx >= 0 && idx < history.length) ? history[idx] : 0;
+			if (MoveFactory.intToMove(m) == counterMove) {
+				score = Integer.MAX_VALUE - 10000;
+			}
 			scores[i] = score;
 		}
 	}
