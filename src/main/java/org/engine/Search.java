@@ -860,20 +860,6 @@ public final class Search {
 			return white ? PositionFactory.BP : PositionFactory.WP;
 		}
 		
-		// For regular captures and promotions, get piece at destination
-		// Note: This is called after the move is made and then undone, so we need to be careful
-		// Actually, looking at the code, this is called after undoMoveInPlace, so board is back to original state
-		// But wait, the move has been undone, so the piece at 'to' is back to the captured piece... no wait
-		// After undoMoveInPlace, 'to' has the original piece that was there (the victim)
-		
-		// Actually, we need to get the captured piece before makeMove is called.
-		// But this method is called after the move loop. Let me reconsider.
-		
-		// Looking more carefully: we're storing moves in captureList before they're made
-		// Then after undoing, we're calling this method
-		// After undo, the board is back to the state before the move
-		// So at the destination square, we have the captured piece (if any)
-		
 		return PositionFactory.pieceAt(board, to);
 	}
 }
