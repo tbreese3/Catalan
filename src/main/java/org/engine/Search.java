@@ -12,7 +12,7 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
-    // Replaced by tunables in SPSA
+	private static final int SEE_PRUNE_MAX_DEPTH = 6;
 
 	public static final class Limits {
 		public int depth = -1;
@@ -92,6 +92,7 @@ public final class Search {
 	private final int futilityMaxDepth;
 	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
+	private final int seeMargin;
 	private final int nmpBase;
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
@@ -115,6 +116,7 @@ public final class Search {
 		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
 		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
+		this.seeMargin = spsa.mseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
 		this.nmpEvalMargin = Math.max(1, spsa.nmpEvalMargin);
@@ -513,6 +515,26 @@ public final class Search {
 					searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
 					se.reduction = appliedReduction;
 				}
+				}
+			}
+
+			if (!isQuiet && nodeType == NodeType.nonPVNode && !se.inCheck) {
+				int flags = MoveFactory.GetFlags(move);
+				boolean isPromotion = (flags == MoveFactory.FLAG_PROMOTION);
+				if (!isPromotion) {
+					int seeVal = SEE.see(board, move);
+					if (seeVal < seeMargin) {
+						boolean givesCheck = pos.givesCheck(board, move, moveGen);
+						boolean isRecapture = (ply > 0) && (MoveFactory.GetTo(stack[ply - 1].move) == MoveFactory.GetTo(move));
+						if (!givesCheck && !isRecapture) {
+							if (depth <= SEE_PRUNE_MAX_DEPTH) {
+								continue;
+							} else {
+								appliedReduction = Math.max(appliedReduction, 1);
+								searchDepthChild = Math.max(1, depth - 1 - appliedReduction);
+							}
+						}
+					}
 				}
 			}
 

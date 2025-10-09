@@ -12,6 +12,7 @@ ReverseFUTMarginPerDepth, int, 111.0, 0.0, 1024.0, 16.0, 0.003
 FUTMaxDepth, int, 2.0, 0.0, 8.0, 0.3, 0.00333333
 FUTMarginPerDepth, int, 110.0, 0.0, 1024.0, 16.0, 0.003
 QSeeMargin, int, -7.0, -1024.0, 1024.0, 8.0, 0.003
+MSeeMargin, int, 0.0, -1024.0, 1024.0, 8.0, 0.003
 LMPMaxDepth, int, 3.0, 0.0, 8.0, 0.3, 0.00333333
 LMPBaseThreshold, int, 4.0, 0.0, 64.0, 1.0, 0.00333333
 LMPPerDepth, int, 1.0, 0.0, 16.0, 1.0, 0.00333333
@@ -40,6 +41,7 @@ public final class SPSA {
     public int futilityMarginPerDepth = 110;
     public int lmpMarginPerDepth = 129;
     public int qseeMargin = -7;
+    public int mseeMargin = 0;
     public int nmpBase = 2;
     public double nmpDepthScale = 0.23;
     public int nmpEvalMargin = 241;
@@ -79,6 +81,9 @@ public final class SPSA {
                 break;
             case "QSeeMargin":
                 qseeMargin = value;
+                break;
+            case "MSeeMargin":
+                mseeMargin = value;
                 break;
             case "NMPBase":
                 nmpBase = Math.max(0, value);
