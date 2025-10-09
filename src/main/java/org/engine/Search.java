@@ -71,11 +71,15 @@ public final class Search {
 	private static final int HISTORY_MAX = 16384;
 	private final int[] history = new int[HISTORY_SIZE];
 	private final int[] counterMoves = new int[HISTORY_SIZE];
+	
+	private static final int CAPTURE_HISTORY_SIZE = 12 * 64 * 12;
+	private final int[] captureHistory = new int[CAPTURE_HISTORY_SIZE];
 
 	private static final int LMR_MAX_DEPTH = 64;
 	private static final int LMR_MAX_MOVES = 64;
 	private final int[][] lmrTable = new int[LMR_MAX_DEPTH + 1][LMR_MAX_MOVES + 1];
 	private final int[][] quietBuffers = new int[MAX_PLY + 5][MAX_MOVES];
+	private final int[][] captureBuffers = new int[MAX_PLY + 5][MAX_MOVES];
 
 	private final int lmpMaxDepth;
 	private final int lmpBaseThreshold;
@@ -171,6 +175,7 @@ public final class Search {
 		for (int i = 0; i < stack.length; i++) stack[i] = new StackEntry();
 		clearHistory();
 		clearCounterMoves();
+		clearCaptureHistory();
 
 		Result result = new Result();
 
@@ -405,7 +410,7 @@ public final class Search {
 			}
 			killer = stack[ply].searchKiller;
 		}
-		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, captureHistory, moves, moveScores[ply], ttMoveForNode, killer, true, counterToPass);
 
 		boolean movePlayed = false;
 		int originalAlpha = alpha;
@@ -414,6 +419,8 @@ public final class Search {
 		int quietsTried = 0;
 		int[] quietList = quietBuffers[ply];
 		int quietCount = 0;
+		int[] captureList = captureBuffers[ply];
+		int captureCount = 0;
 		for (int move; !MoveFactory.isNone(move = picker.next()); i++) {
 			if (stopCheck()) break;
 
@@ -516,10 +523,11 @@ public final class Search {
 				}
 			}
 
-			Eval.doMoveAccumulator(nnueState, board, move);
-			if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
-			movePlayed = true;
-			if (isQuiet && quietCount < MAX_MOVES) quietList[quietCount++] = move;
+		Eval.doMoveAccumulator(nnueState, board, move);
+		if (!pos.makeMoveInPlace(board, move, moveGen)) { Eval.undoMoveAccumulator(nnueState); continue; }
+		movePlayed = true;
+		if (isQuiet && quietCount < MAX_MOVES) quietList[quietCount++] = move;
+		else if (!isQuiet && captureCount < MAX_MOVES) captureList[captureCount++] = move;
 
 			stack[ply].move = move;
 			int score;
@@ -552,23 +560,25 @@ public final class Search {
 				}
 			}
 
-			if (alpha >= beta) {
-				if (isQuiet) {
-					int m = MoveFactory.intToMove(move);
-					if (m != 0) stack[ply].searchKiller = m;
-					boolean white = PositionFactory.whiteToMove(board);
-					applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
-					if (ply > 0) {
-						int prev = stack[ply - 1].move;
-						if (!MoveFactory.isNone(prev)) {
-							boolean prevWhite = !PositionFactory.whiteToMove(board);
-							int cIdx = historyIndex(prevWhite, prev);
-							if (cIdx >= 0 && cIdx < counterMoves.length) counterMoves[cIdx] = MoveFactory.intToMove(move);
-						}
+		if (alpha >= beta) {
+			if (isQuiet) {
+				int m = MoveFactory.intToMove(move);
+				if (m != 0) stack[ply].searchKiller = m;
+				boolean white = PositionFactory.whiteToMove(board);
+				applyHistoryUpdatesForCutoff(white, move, Math.max(1, depth), quietList, quietCount);
+				if (ply > 0) {
+					int prev = stack[ply - 1].move;
+					if (!MoveFactory.isNone(prev)) {
+						boolean prevWhite = !PositionFactory.whiteToMove(board);
+						int cIdx = historyIndex(prevWhite, prev);
+						if (cIdx >= 0 && cIdx < counterMoves.length) counterMoves[cIdx] = MoveFactory.intToMove(move);
 					}
 				}
-				break;
+			} else {
+				applyCaptureHistoryUpdatesForCutoff(board, move, Math.max(1, depth), captureList, captureCount);
 			}
+			break;
+		}
 		}
 
 		if (!movePlayed) {
@@ -656,7 +666,7 @@ public final class Search {
 
         int[] moves = moveBuffers[ply];
         int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
+        MovePicker picker = new MovePicker(board, pos, moveGen, history, captureHistory, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
 
 		boolean movePlayed = false;
         int bestScore = standPat;
@@ -758,6 +768,29 @@ public final class Search {
 	private int historyScore(boolean white, int move) {
 		return history[historyIndex(white, move)];
 	}
+	
+	private void clearCaptureHistory() {
+		for (int i = 0; i < captureHistory.length; i++) captureHistory[i] = 0;
+	}
+	
+	private static int captureHistoryIndex(int piece, int to, int captured) {
+		return (piece * 64 + to) * 12 + captured;
+	}
+	
+	private int captureHistoryScore(int piece, int to, int captured) {
+		int idx = captureHistoryIndex(piece, to, captured);
+		if (idx >= 0 && idx < captureHistory.length) {
+			return captureHistory[idx];
+		}
+		return 0;
+	}
+	
+	private void updateCaptureHistory(int idx, int delta) {
+		int d = Math.max(-HISTORY_MAX, Math.min(HISTORY_MAX, delta));
+		int old = captureHistory[idx];
+		int adj = (int) (((long) Math.abs(d) * (long) old) / HISTORY_MAX);
+		captureHistory[idx] = old + d - adj;
+	}
 
 	private static int calculateHistoryBonus(int depth) {
 		int bonus = Math.max(0, depth * 300 - 300);
@@ -782,6 +815,66 @@ public final class Search {
 			int idx = historyIndex(white, mv);
 			updateHistoryScore(idx, malus);
 		}
+	}
+	
+	private void applyCaptureHistoryUpdatesForCutoff(long[] board, int bestMove, int depth, int[] captureMoves, int count) {
+		int bonus = calculateHistoryBonus(depth);
+		int malus = -bonus;
+		
+		int bestFrom = MoveFactory.GetFrom(bestMove);
+		int bestTo = MoveFactory.GetTo(bestMove);
+		int bestPiece = PositionFactory.pieceAt(board, bestFrom);
+		int bestCaptured = getCapturedPiece(board, bestMove);
+		
+		if (bestPiece != -1 && bestCaptured != -1) {
+			int bestIdx = captureHistoryIndex(bestPiece, bestTo, bestCaptured);
+			if (bestIdx >= 0 && bestIdx < captureHistory.length) {
+				updateCaptureHistory(bestIdx, bonus);
+			}
+		}
+		
+		for (int i = 0; i < count; i++) {
+			int mv = captureMoves[i];
+			if (mv == bestMove) continue;
+			
+			int from = MoveFactory.GetFrom(mv);
+			int to = MoveFactory.GetTo(mv);
+			int piece = PositionFactory.pieceAt(board, from);
+			int captured = getCapturedPiece(board, mv);
+			
+			if (piece != -1 && captured != -1) {
+				int idx = captureHistoryIndex(piece, to, captured);
+				if (idx >= 0 && idx < captureHistory.length) {
+					updateCaptureHistory(idx, malus);
+				}
+			}
+		}
+	}
+	
+	private int getCapturedPiece(long[] board, int move) {
+		int to = MoveFactory.GetTo(move);
+		int flags = MoveFactory.GetFlags(move);
+		
+		if (flags == MoveFactory.FLAG_EN_PASSANT) {
+			boolean white = PositionFactory.whiteToMove(board);
+			return white ? PositionFactory.BP : PositionFactory.WP;
+		}
+		
+		// For regular captures and promotions, get piece at destination
+		// Note: This is called after the move is made and then undone, so we need to be careful
+		// Actually, looking at the code, this is called after undoMoveInPlace, so board is back to original state
+		// But wait, the move has been undone, so the piece at 'to' is back to the captured piece... no wait
+		// After undoMoveInPlace, 'to' has the original piece that was there (the victim)
+		
+		// Actually, we need to get the captured piece before makeMove is called.
+		// But this method is called after the move loop. Let me reconsider.
+		
+		// Looking more carefully: we're storing moves in captureList before they're made
+		// Then after undoing, we're calling this method
+		// After undo, the board is back to the state before the move
+		// So at the destination square, we have the captured piece (if any)
+		
+		return PositionFactory.pieceAt(board, to);
 	}
 }
 

@@ -7,6 +7,7 @@ final class MovePicker {
 	private final int[] buffer;
 	private final int[] scores;
 	private final int[] history;
+	private final int[] captureHistory;
 	private final int ttMove;
 	private final int killerMove;
 	private final int counterMove;
@@ -26,11 +27,12 @@ final class MovePicker {
 		private int quietStart;
 		private int quietCount;
 
-	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int counterMove) {
+	MovePicker(long[] board, PositionFactory pos, MoveGenerator gen, int[] history, int[] captureHistory, int[] moveBuffer, int[] scoreBuffer, int ttMove, int killerMove, boolean includeQuiets, int counterMove) {
 		this.board = board;
 		this.pos = pos;
 		this.gen = gen;
 		this.history = history;
+		this.captureHistory = captureHistory;
 		this.buffer = moveBuffer;
 		this.scores = scoreBuffer;
 		this.ttMove = MoveFactory.intToMove(ttMove);
@@ -67,8 +69,12 @@ final class MovePicker {
 		if (isCapture) {
 			int vicVal = PIECE_VALUES[victim == -1 ? 0 : victim];
 			int attVal = PIECE_VALUES[attacker];
-			// Classic MVV-LVA: prefer higher victim, lower attacker
-			score = (vicVal << 4) - attVal; // multiply victim by 16 for separation
+			score = (vicVal << 4) - attVal; 
+			
+			if (captureHistory != null && victim != -1) {
+				int capHistScore = captureHistoryScore(attacker, to, victim);
+				score += capHistScore;
+			}
 		}
 
 		if (flags == MoveFactory.FLAG_PROMOTION) {
@@ -119,6 +125,18 @@ final class MovePicker {
 		int to = MoveFactory.GetTo(move);
 		int side = white ? 0 : 1;
 		return (side << 12) | (from << 6) | to;
+	}
+	
+	private static int captureHistoryIndex(int piece, int to, int captured) {
+		return (piece * 64 + to) * 12 + captured;
+	}
+	
+	private int captureHistoryScore(int piece, int to, int captured) {
+		int idx = captureHistoryIndex(piece, to, captured);
+		if (idx >= 0 && idx < captureHistory.length) {
+			return captureHistory[idx];
+		}
+		return 0;
 	}
 
 	private void scorequietsRange(int start, int size) {
