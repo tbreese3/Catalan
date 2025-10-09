@@ -23,6 +23,9 @@ SingularMarginPerDepth, int, 2.0, 0.0, 8.0, 1.0, 0.005
 TMHeuristicsMinDepth, int, 6.0, 0.0, 32.0, 1.0, 0.005
 TMMaxExtensionFactor100, int, 350.0, 100.0, 1000.0, 10.0, 0.003
 TMInstabilityScoreWeight10000, int, 70.0, 0.0, 1000.0, 5.0, 0.003
+SEEPruningMaxDepth, int, 8.0, 0.0, 16.0, 1.0, 0.005
+SEEPruningQuietMargin, int, -60.0, -512.0, 0.0, 10.0, 0.003
+SEEPruningCaptureMargin, int, -20.0, -512.0, 0.0, 10.0, 0.003
 
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
@@ -54,6 +57,9 @@ public final class SPSA {
     public int tmHeuristicsMinDepth = 6;
     public double tmMaxExtensionFactor = 3.5;
     public double tmInstabilityScoreWeight = 0.007;
+    public int seePruningMaxDepth = 8;
+    public int seePruningQuietMargin = -60;
+    public int seePruningCaptureMargin = -20;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -124,6 +130,15 @@ public final class SPSA {
                 break;
             case "TMInstabilityScoreWeight10000":
                 tmInstabilityScoreWeight = Math.max(0.0, value / 10000.0);
+                break;
+            case "SEEPruningMaxDepth":
+                seePruningMaxDepth = Math.max(0, value);
+                break;
+            case "SEEPruningQuietMargin":
+                seePruningQuietMargin = value;
+                break;
+            case "SEEPruningCaptureMargin":
+                seePruningCaptureMargin = value;
                 break;
             default:
                 break;

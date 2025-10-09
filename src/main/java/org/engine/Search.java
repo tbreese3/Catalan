@@ -98,6 +98,9 @@ public final class Search {
 	private final int nmpEvalMax;
     private final int singularMinDepth;
 	private final int singularMarginPerDepth;
+	private final int seePruningMaxDepth;
+	private final int seePruningQuietMargin;
+	private final int seePruningCaptureMargin;
 
 	private final int tmHeuristicsMinDepth;
 	private final double tmMaxExtensionFactor;
@@ -127,6 +130,9 @@ public final class Search {
 		this.iirMinCutDepth = Math.max(0, spsa.iirMinCutDepth);
         this.singularMinDepth = Math.max(0, spsa.singularMinDepth);
         this.singularMarginPerDepth = Math.max(0, spsa.singularMarginPerDepth);
+		this.seePruningMaxDepth = Math.max(0, spsa.seePruningMaxDepth);
+		this.seePruningQuietMargin = spsa.seePruningQuietMargin;
+		this.seePruningCaptureMargin = spsa.seePruningCaptureMargin;
 		this.tmHeuristicsMinDepth = Math.max(0, spsa.tmHeuristicsMinDepth);
 		this.tmMaxExtensionFactor = Math.max(1.0, spsa.tmMaxExtensionFactor);
 		this.tmInstabilityScoreWeight = Math.max(0.0, spsa.tmInstabilityScoreWeight);
@@ -452,6 +458,13 @@ public final class Search {
 						quietsTried++;
 						continue;
 					}
+				}
+			}
+
+			if (nodeType == NodeType.nonPVNode && !se.inCheck && depth <= seePruningMaxDepth && move != ttMoveForNode && move != killer) {
+				int seeThreshold = isQuiet ? (seePruningQuietMargin * depth) : (seePruningCaptureMargin * depth);
+				if (SEE.see(board, move) < seeThreshold) {
+					continue;
 				}
 			}
 
