@@ -12,7 +12,6 @@ public final class Search {
 	private static final int INFTY = 1_000_000;
 	private static final int MATE_VALUE = 32000;
 	private static final int SCORE_NONE = 123456789;
-	private static final int SEE_PRUNE_MAX_DEPTH = 6;
 
 	public static final class Limits {
 		public int depth = -1;
@@ -93,6 +92,7 @@ public final class Search {
 	private final int futilityMarginPerDepth;
 	private final int qsSeeMargin;
 	private final int seeMargin;
+	private final int seePruneMaxDepth;
 	private final int nmpBase;
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
@@ -116,6 +116,7 @@ public final class Search {
 		this.futilityMaxDepth = Math.max(0, spsa.futilityMaxDepth);
 		this.futilityMarginPerDepth = Math.max(0, spsa.futilityMarginPerDepth);
 		this.qsSeeMargin = spsa.qseeMargin;
+		this.seePruneMaxDepth = Math.max(0, spsa.mseePruneMaxDepth);
 		this.seeMargin = spsa.mseeMargin;
 		this.nmpBase = Math.max(0, spsa.nmpBase);
 		this.nmpDepthScale = Math.max(0.0, spsa.nmpDepthScale);
@@ -527,7 +528,7 @@ public final class Search {
 						boolean givesCheck = pos.givesCheck(board, move, moveGen);
 						boolean isRecapture = (ply > 0) && (MoveFactory.GetTo(stack[ply - 1].move) == MoveFactory.GetTo(move));
 						if (!givesCheck && !isRecapture) {
-							if (depth <= SEE_PRUNE_MAX_DEPTH) {
+							if (depth <= seePruneMaxDepth) {
 								continue;
 							} else {
 								appliedReduction = Math.max(appliedReduction, 1);
