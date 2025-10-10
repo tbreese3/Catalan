@@ -21,7 +21,7 @@ public class Main {
     static {
         installCrashLogger();
     }
-    public static boolean SPSA_TUNE_MODE = false;
+    public static boolean SPSA_TUNE_MODE = true;
 
 	public static void main(String[] args) throws Exception {
 		if (args != null && args.length > 0 && args[0].equalsIgnoreCase("bench")) {
