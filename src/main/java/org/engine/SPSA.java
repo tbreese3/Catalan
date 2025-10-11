@@ -24,6 +24,9 @@ TMHeuristicsMinDepth, int, 5.0, 0.0, 32.0, 1.0, 0.005
 TMMaxExtensionFactor100, int, 356.0, 100.0, 1000.0, 10.0, 0.003
 TMInstabilityScoreWeight10000, int, 69.0, 0.0, 1000.0, 5.0, 0.003
 
+RazorMaxDepth, int, 1.0, 0.0, 4.0, 1.0, 0.00333333
+RazorMarginPerDepth, int, 256.0, 0.0, 1024.0, 16.0, 0.003
+
 Notes:
 - LMRBase100 -> lmrBase = value / 100.0
 - LMRDivisor100 -> lmrDivisor = value / 100.0
@@ -54,6 +57,8 @@ public final class SPSA {
     public int tmHeuristicsMinDepth = 5;
     public double tmMaxExtensionFactor = 3.56;
     public double tmInstabilityScoreWeight = 0.0069;
+    public int razorMaxDepth = 1;
+    public int razorMarginPerDepth = 256;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -124,6 +129,12 @@ public final class SPSA {
                 break;
             case "TMInstabilityScoreWeight10000":
                 tmInstabilityScoreWeight = Math.max(0.0, value / 10000.0);
+                break;
+            case "RazorMaxDepth":
+                razorMaxDepth = Math.max(0, value);
+                break;
+            case "RazorMarginPerDepth":
+                razorMarginPerDepth = Math.max(0, value);
                 break;
             default:
                 break;

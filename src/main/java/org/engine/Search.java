@@ -96,6 +96,8 @@ public final class Search {
 	private final double nmpDepthScale;
 	private final int nmpEvalMargin;
 	private final int nmpEvalMax;
+	private final int razorMaxDepth;
+	private final int razorMarginPerDepth;
     private final int singularMinDepth;
 	private final int singularMarginPerDepth;
 
@@ -130,6 +132,8 @@ public final class Search {
 		this.tmHeuristicsMinDepth = Math.max(0, spsa.tmHeuristicsMinDepth);
 		this.tmMaxExtensionFactor = Math.max(1.0, spsa.tmMaxExtensionFactor);
 		this.tmInstabilityScoreWeight = Math.max(0.0, spsa.tmInstabilityScoreWeight);
+		this.razorMaxDepth = Math.max(0, spsa.razorMaxDepth);
+		this.razorMarginPerDepth = Math.max(0, spsa.razorMarginPerDepth);
 		buildLmrTable();
 	}
 
@@ -347,6 +351,21 @@ public final class Search {
             }
             se.staticEval = rawEval;
         }
+
+		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= razorMaxDepth) {
+			int eval = se.staticEval;
+			if (eval != SCORE_NONE && pos.hasNonPawnMaterialForSTM(board)) {
+				if (Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE) {
+					int margin = razorMarginPerDepth * Math.max(1, depth);
+					if (eval + margin <= alpha) {
+						int score = quiescence(board, ply, alpha - 1, alpha, NodeType.nonPVNode);
+						if (score <= alpha) {
+							return score;
+						}
+					}
+				}
+			}
+		}
 
 		if (!inCheck && nodeType == NodeType.nonPVNode && depth <= reverseFutilityMaxDepth) {
 			if (pos.hasNonPawnMaterialForSTM(board)) {
