@@ -57,6 +57,7 @@ public class UCI {
                     System.out.println("option name TMHeuristicsMinDepth type spin default " + spsa.tmHeuristicsMinDepth + " min 0 max 32");
                     System.out.println("option name TMMaxExtensionFactor100 type spin default " + (int)Math.round(spsa.tmMaxExtensionFactor * 100) + " min 100 max 1000");
                     System.out.println("option name TMInstabilityScoreWeight10000 type spin default " + (int)Math.round(spsa.tmInstabilityScoreWeight * 10000) + " min 0 max 1000");
+                    System.out.println("option name QFutMargin type spin default " + spsa.qfutMargin + " min -1024 max 2048");
                 }
                 System.out.println("uciok");
             } else if (line.equals("isready")) {

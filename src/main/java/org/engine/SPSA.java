@@ -59,6 +59,7 @@ public final class SPSA {
     public double tmInstabilityScoreWeight = 0.0069;
     public int razorMaxDepth = 1;
     public int razorMarginPerDepth = 256;
+    public int qfutMargin = 0;
 
     public void setByName(String name, int value) {
         if (name == null) return;
@@ -135,6 +136,9 @@ public final class SPSA {
                 break;
             case "RazorMarginPerDepth":
                 razorMarginPerDepth = Math.max(0, value);
+                break;
+            case "QFutMargin":
+                qfutMargin = value;
                 break;
             default:
                 break;

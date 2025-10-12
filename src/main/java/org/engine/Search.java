@@ -98,6 +98,7 @@ public final class Search {
 	private final int nmpEvalMax;
 	private final int razorMaxDepth;
 	private final int razorMarginPerDepth;
+	private final int qfutMargin;
     private final int singularMinDepth;
 	private final int singularMarginPerDepth;
 
@@ -134,6 +135,7 @@ public final class Search {
 		this.tmInstabilityScoreWeight = Math.max(0.0, spsa.tmInstabilityScoreWeight);
 		this.razorMaxDepth = Math.max(0, spsa.razorMaxDepth);
 		this.razorMarginPerDepth = Math.max(0, spsa.razorMarginPerDepth);
+		this.qfutMargin = spsa.qfutMargin;
 		buildLmrTable();
 	}
 
@@ -673,9 +675,23 @@ public final class Search {
 			standPat = -INFTY;
 		}
 
-        int[] moves = moveBuffers[ply];
-        int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
-        MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
+		int[] moves = moveBuffers[ply];
+		int ttMoveForQ = ttHit ? MoveFactory.intToMove(ttEntry.getPackedMove()) : MoveFactory.MOVE_NONE;
+		MovePicker picker = new MovePicker(board, pos, moveGen, history, moves, moveScores[ply], ttMoveForQ, MoveFactory.MOVE_NONE, inCheck, MoveFactory.MOVE_NONE);
+
+		if (!inCheck && qfutMargin != 0) {
+			int maxGain = 0;
+			int capCount = moveGen.generateCaptures(board, moves, 0);
+			for (int i = 0; i < capCount; i++) {
+				int mv = moves[i];
+				int see = SEE.see(board, mv);
+				if (see > maxGain) maxGain = see;
+			}
+			int futBound = standPat + maxGain + qfutMargin;
+			if (futBound <= alpha && Math.abs(alpha) < MATE_VALUE && Math.abs(beta) < MATE_VALUE) {
+				return futBound;
+			}
+		}
 
 		boolean movePlayed = false;
         int bestScore = standPat;
